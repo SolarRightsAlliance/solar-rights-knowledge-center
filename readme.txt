@@ -19,3 +19,4 @@ Provides a reusable live-search shortcode, synonym-aware ranking, highlighted ma
 == Changelog ==
 = 1.2.0 =
 * Added privacy-conscious analytics dashboard and data-retention controls.
+
