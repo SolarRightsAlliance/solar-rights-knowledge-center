@@ -1,0 +1,38 @@
+name: Build WordPress Plugin ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create plugin folder
+        run: |
+          mkdir -p build/solar-rights-search
+          rsync -av \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='build' \
+            --exclude='*.zip' \
+            ./ build/solar-rights-search/
+
+      - name: Create ZIP
+        run: |
+          cd build
+          zip -r ../solar-rights-search-${GITHUB_REF_NAME}.zip solar-rights-search
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: solar-rights-search-${{ github.ref_name }}.zip
+          generate_release_notes: true
