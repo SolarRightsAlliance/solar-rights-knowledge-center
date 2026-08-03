@@ -63,6 +63,10 @@ final class SRA_Analytics_Dashboard {
             $days
         );
 
+        $content_opportunities = SRA_Analytics_Queries::content_opportunities(
+            $days
+        );
+
         $top_clicked = SRA_Analytics_Queries::top_clicked_articles(
             $days
         );
@@ -199,6 +203,12 @@ final class SRA_Analytics_Dashboard {
                 ?>
 
                 <?php
+                self::render_content_opportunities_table(
+                    $content_opportunities
+                );
+                ?>
+
+                <?php
                 self::render_clicked_articles_table(
                     $top_clicked
                 );
@@ -314,6 +324,20 @@ final class SRA_Analytics_Dashboard {
 
             .sra-kc-panel a:hover {
                 text-decoration: underline;
+            }
+
+            .sra-kc-opportunity-badge {
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 999px;
+                background: #f0f0f1;
+                font-size: 12px;
+                line-height: 1.4;
+                white-space: nowrap;
+            }
+
+            .sra-kc-opportunity-score {
+                font-weight: 600;
             }
 
             @media (max-width: 900px) {
@@ -439,6 +463,139 @@ final class SRA_Analytics_Dashboard {
             }
 
             echo '</td>';
+
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+
+        echo '</section>';
+    }
+
+    private static function render_content_opportunities_table( $rows ) {
+
+        echo '<section class="sra-kc-panel">';
+
+        echo '<h2>' .
+            esc_html__(
+                'Content opportunities',
+                'solar-rights-search'
+            ) .
+            '</h2>';
+
+        echo '<p>' .
+            esc_html__(
+                'Searches that may indicate missing content or answers that are not compelling enough to click.',
+                'solar-rights-search'
+            ) .
+            '</p>';
+
+        if ( empty( $rows ) ) {
+
+            echo '<p>' .
+                esc_html__(
+                    'No significant opportunities yet.',
+                    'solar-rights-search'
+                ) .
+                '</p></section>';
+
+            return;
+        }
+
+        echo '<table>';
+
+        echo '<thead><tr>';
+
+        echo '<th>' .
+            esc_html__(
+                'Search',
+                'solar-rights-search'
+            ) .
+            '</th>';
+
+        echo '<th>' .
+            esc_html__(
+                'Searches',
+                'solar-rights-search'
+            ) .
+            '</th>';
+
+        echo '<th>' .
+            esc_html__(
+                'Avg. results',
+                'solar-rights-search'
+            ) .
+            '</th>';
+
+        echo '<th>' .
+            esc_html__(
+                'CTR',
+                'solar-rights-search'
+            ) .
+            '</th>';
+
+        echo '<th>' .
+            esc_html__(
+                'Issue',
+                'solar-rights-search'
+            ) .
+            '</th>';
+
+        echo '<th>' .
+            esc_html__(
+                'Score',
+                'solar-rights-search'
+            ) .
+            '</th>';
+
+        echo '</tr></thead><tbody>';
+
+        foreach ( $rows as $row ) {
+
+            echo '<tr>';
+
+            echo '<td>' .
+                esc_html( $row['term'] ) .
+                '</td>';
+
+            echo '<td>' .
+                esc_html(
+                    number_format_i18n(
+                        $row['searches']
+                    )
+                ) .
+                '</td>';
+
+            echo '<td>' .
+                esc_html(
+                    number_format_i18n(
+                        $row['avg_results'],
+                        1
+                    )
+                ) .
+                '</td>';
+
+            echo '<td>' .
+                esc_html(
+                    number_format_i18n(
+                        $row['ctr'],
+                        1
+                    ) . '%'
+                ) .
+                '</td>';
+
+            echo '<td><span class="sra-kc-opportunity-badge">' .
+                esc_html( $row['issue'] ) .
+                '</span></td>';
+
+            echo '<td class="sra-kc-opportunity-score">' .
+                esc_html(
+                    number_format_i18n(
+                        $row['score'],
+                        1
+                    )
+                ) .
+                '</td>';
 
             echo '</tr>';
         }
