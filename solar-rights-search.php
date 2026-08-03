@@ -21,10 +21,23 @@ define( 'SRA_SEARCH_URL', plugin_dir_url( __FILE__ ) );
 define( 'SRA_SEARCH_PATH', plugin_dir_path( __FILE__ ) );
 
 require_once SRA_SEARCH_PATH . 'includes/class-sra-search-settings.php';
+
 require_once SRA_SEARCH_PATH . 'includes/class-sra-search-analytics.php';
+
+require_once SRA_SEARCH_PATH . 'includes/class-sra-analytics-queries.php';
+
+require_once SRA_SEARCH_PATH . 'includes/class-sra-analytics-dashboard.php';
+
 require_once SRA_SEARCH_PATH . 'includes/class-sra-search-plugin.php';
 
-register_activation_hook( __FILE__, array( 'SRA_Search_Analytics', 'activate' ) );
-register_deactivation_hook( __FILE__, array( 'SRA_Search_Analytics', 'deactivate' ) );
+register_activation_hook(
+    __FILE__,
+    array( 'SRA_Search_Analytics', 'activate' )
+);
+
+register_deactivation_hook(
+    __FILE__,
+    array( 'SRA_Search_Analytics', 'deactivate' )
+);
 
 SRA_Search_Plugin::instance();

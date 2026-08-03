@@ -179,7 +179,7 @@ final class SRA_Search_Plugin {
             __( 'Knowledge Center', 'solar-rights-search' ),
             'manage_options',
             'sra-knowledge-center',
-            array( 'SRA_Search_Analytics', 'dashboard_page' ),
+            array( 'SRA_Analytics_Dashboard', 'render' ),
             'dashicons-welcome-learn-more',
             58
         );
@@ -190,7 +190,7 @@ final class SRA_Search_Plugin {
             __( 'Analytics', 'solar-rights-search' ),
             'manage_options',
             'sra-knowledge-center',
-            array( 'SRA_Search_Analytics', 'dashboard_page' )
+            array( 'SRA_Analytics_Dashboard', 'render' )
         );
 
         add_submenu_page(
