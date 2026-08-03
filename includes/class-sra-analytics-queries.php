@@ -131,6 +131,88 @@ final class SRA_Analytics_Queries {
         );
     }
 
+    /**
+     * Return the most-clicked individual search results.
+     *
+     * Only actual result clicks are included. "View all" clicks are
+     * intentionally excluded.
+     */
+    public static function top_clicked_articles( $days ) {
+
+        global $wpdb;
+
+        $table = SRA_Search_Analytics::table_name();
+        $since = self::since_date( $days );
+
+        $sql = $wpdb->prepare(
+            "
+            SELECT
+                clicked_url,
+                COUNT(*) AS clicks
+            FROM {$table}
+            WHERE
+                searched_at >= %s
+                AND clicked = 1
+                AND click_type = 'result'
+                AND clicked_url IS NOT NULL
+                AND clicked_url <> ''
+            GROUP BY clicked_url
+            ORDER BY clicks DESC
+            LIMIT 12
+            ",
+            $since
+        ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+        $rows = $wpdb->get_results(
+            $sql,
+            ARRAY_A
+        );
+
+        $articles = array();
+
+        foreach ( $rows as $row ) {
+
+            $url = esc_url_raw(
+                $row['clicked_url']
+            );
+
+            if ( '' === $url ) {
+                continue;
+            }
+
+            $post_id = url_to_postid( $url );
+
+            if ( $post_id ) {
+
+                $title = get_the_title( $post_id );
+
+            } else {
+
+                /*
+                 * Fallback for a URL that can no longer be resolved
+                 * to a current WordPress post.
+                 */
+                $path = wp_parse_url(
+                    $url,
+                    PHP_URL_PATH
+                );
+
+                $title = $path
+                    ? untrailingslashit( $path )
+                    : $url;
+            }
+
+            $articles[] = array(
+                'post_id' => absint( $post_id ),
+                'title'   => $title,
+                'url'     => $url,
+                'clicks'  => absint( $row['clicks'] ),
+            );
+        }
+
+        return $articles;
+    }
+
     public static function top_sources( $days ) {
 
         global $wpdb;

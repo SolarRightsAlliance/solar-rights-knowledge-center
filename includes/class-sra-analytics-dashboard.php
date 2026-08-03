@@ -60,12 +60,16 @@ final class SRA_Analytics_Dashboard {
         );
 
         $low_ctr = SRA_Analytics_Queries::low_ctr_searches(
-            $days
-        );
+    $days
+);
 
-        $sources = SRA_Analytics_Queries::top_sources(
-            $days
-        );
+$top_clicked = SRA_Analytics_Queries::top_clicked_articles(
+    $days
+);
+
+$sources = SRA_Analytics_Queries::top_sources(
+    $days
+);
 
         ?>
         <div class="wrap sra-kc-dashboard">
@@ -193,6 +197,94 @@ final class SRA_Analytics_Dashboard {
                     false
                 );
                 ?>
+
+                <?php
+                self::render_clicked_articles_table(
+                $top_clicked
+                );
+                ?>
+
+private static function render_clicked_articles_table( $rows ) {
+
+    echo '<section class="sra-kc-panel">';
+
+    echo '<h2>' .
+        esc_html__(
+            'Top clicked articles',
+            'solar-rights-search'
+        ) .
+        '</h2>';
+
+    if ( empty( $rows ) ) {
+
+        echo '<p>' .
+            esc_html__(
+                'No article clicks yet.',
+                'solar-rights-search'
+            ) .
+            '</p></section>';
+
+        return;
+    }
+
+    echo '<table>';
+
+    echo '<thead><tr>';
+
+    echo '<th>' .
+        esc_html__(
+            'Article',
+            'solar-rights-search'
+        ) .
+        '</th>';
+
+    echo '<th>' .
+        esc_html__(
+            'Clicks',
+            'solar-rights-search'
+        ) .
+        '</th>';
+
+    echo '</tr></thead><tbody>';
+
+    foreach ( $rows as $row ) {
+
+        echo '<tr>';
+
+        echo '<td>';
+
+        if ( ! empty( $row['url'] ) ) {
+
+            echo '<a href="' .
+                esc_url( $row['url'] ) .
+                '" target="_blank" rel="noopener noreferrer">' .
+                esc_html( $row['title'] ) .
+                '</a>';
+
+        } else {
+
+            echo esc_html(
+                $row['title']
+            );
+        }
+
+        echo '</td>';
+
+        echo '<td>' .
+            esc_html(
+                number_format_i18n(
+                    $row['clicks']
+                )
+            ) .
+            '</td>';
+
+        echo '</tr>';
+    }
+
+    echo '</tbody></table>';
+
+    echo '</section>';
+}
 
                 <?php
                 self::render_source_table(
