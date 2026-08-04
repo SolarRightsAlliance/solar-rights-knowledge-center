@@ -1,4 +1,14 @@
 # Changelog
+## 1.3.0
+
+- Added privacy-conscious Knowledge Center analytics dashboard improvements.
+- Added top clicked articles reporting.
+- Added content opportunities and unanswered-question reporting.
+- Added trending searches and period-over-period comparisons.
+- Refactored analytics into separate storage, query, and dashboard classes.
+- Removed anonymous session linking from search analytics.
+- Restricted logged click destinations to local site URLs.
+- Improved analytics dashboard styling and organization.
 
 ## 1.2.0
 - Renamed the admin experience to Knowledge Center.
