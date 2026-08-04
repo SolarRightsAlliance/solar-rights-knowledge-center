@@ -1,4 +1,14 @@
 # Changelog
+
+## 1.3.1
+
+- Added support for searching across multiple post categories.
+- Added optional searching of WordPress Pages alongside Posts.
+- Added a page-level Knowledge Center Search checkbox so Pages are included only when explicitly selected.
+- Added priority phrase ranking to boost results that contain important multi-word phrases.
+- Preserved category restrictions for Posts while allowing opted-in Pages to appear in the same search.
+
+
 ## 1.3.0
 
 - Added privacy-conscious Knowledge Center analytics dashboard improvements.
