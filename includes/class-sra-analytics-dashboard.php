@@ -49,6 +49,10 @@ final class SRA_Analytics_Dashboard {
             $days
         );
 
+        $trending = SRA_Analytics_Queries::trending_searches(
+    $days
+);
+
         $top_searches = SRA_Analytics_Queries::top_searches(
             $days,
             false
@@ -137,22 +141,27 @@ final class SRA_Analytics_Dashboard {
             <div class="sra-kc-cards">
 
                 <?php
-                self::metric_card(
-                    __( 'Searches', 'solar-rights-search' ),
-                    number_format_i18n(
-                        $summary['searches']
-                    )
-                );
+               self::metric_card(
+    __( 'Searches', 'solar-rights-search' ),
+    number_format_i18n( $summary['searches'] ),
+    self::change_label(
+        $summary['search_change'],
+        __( 'vs. previous period', 'solar-rights-search' )
+    )
+);
                 ?>
 
                 <?php
-                self::metric_card(
-                    __( 'Click rate', 'solar-rights-search' ),
-                    number_format_i18n(
-                        $summary['ctr'],
-                        1
-                    ) . '%'
-                );
+               self::metric_card(
+    __( 'Click rate', 'solar-rights-search' ),
+    number_format_i18n(
+        $summary['ctr'],
+        1
+    ) . '%',
+    self::percentage_point_label(
+        $summary['ctr_change']
+    )
+);
                 ?>
 
                 <?php
@@ -185,6 +194,12 @@ final class SRA_Analytics_Dashboard {
                     false
                 );
                 ?>
+
+                <?php
+self::render_trending_table(
+    $trending
+);
+?>
 
                 <?php
                 self::render_search_table(
@@ -272,6 +287,12 @@ final class SRA_Analytics_Dashboard {
 
         </div>
 
+        .sra-kc-card-secondary {
+    display: block;
+    margin-top: 6px;
+    color: #646970;
+    font-size: 12px;
+}
         <style>
             .sra-kc-cards {
                 display: grid;
@@ -357,23 +378,136 @@ final class SRA_Analytics_Dashboard {
         <?php
     }
 
-    private static function metric_card(
-        $label,
-        $value
-    ) {
+   private static function metric_card(
+    $label,
+    $value,
+    $secondary = ''
+) {
 
-        echo '<div class="sra-kc-card">';
+    echo '<div class="sra-kc-card">';
 
-        echo '<span>' .
-            esc_html( $label ) .
-            '</span>';
+    echo '<span>' .
+        esc_html( $label ) .
+        '</span>';
 
-        echo '<strong>' .
-            esc_html( $value ) .
-            '</strong>';
+    echo '<strong>' .
+        esc_html( $value ) .
+        '</strong>';
 
-        echo '</div>';
+    if ( '' !== $secondary ) {
+        echo '<small class="sra-kc-card-secondary">' .
+            esc_html( $secondary ) .
+            '</small>';
     }
+
+    echo '</div>';
+}
+
+private static function change_label(
+    $change,
+    $suffix
+) {
+
+    $change = (float) $change;
+
+    $prefix = $change > 0 ? '+' : '';
+
+    return sprintf(
+        '%s%s%% %s',
+        $prefix,
+        number_format_i18n( $change, 0 ),
+        $suffix
+    );
+}
+
+private static function percentage_point_label( $change ) {
+
+    $change = (float) $change;
+
+    $prefix = $change > 0 ? '+' : '';
+
+    return sprintf(
+        '%s%s percentage points vs. previous period',
+        $prefix,
+        number_format_i18n( $change, 1 )
+    );
+}
+
+private static function render_trending_table( $rows ) {
+
+    echo '<section class="sra-kc-panel">';
+
+    echo '<h2>' .
+        esc_html__(
+            'Trending searches',
+            'solar-rights-search'
+        ) .
+        '</h2>';
+
+    echo '<p>' .
+        esc_html__(
+            'Search terms gaining activity compared with the previous equivalent period.',
+            'solar-rights-search'
+        ) .
+        '</p>';
+
+    if ( empty( $rows ) ) {
+
+        echo '<p>' .
+            esc_html__(
+                'Not enough trend data yet.',
+                'solar-rights-search'
+            ) .
+            '</p></section>';
+
+        return;
+    }
+
+    echo '<table>';
+
+    echo '<thead><tr>';
+    echo '<th>' . esc_html__( 'Search', 'solar-rights-search' ) . '</th>';
+    echo '<th>' . esc_html__( 'Current', 'solar-rights-search' ) . '</th>';
+    echo '<th>' . esc_html__( 'Previous', 'solar-rights-search' ) . '</th>';
+    echo '<th>' . esc_html__( 'Growth', 'solar-rights-search' ) . '</th>';
+    echo '</tr></thead><tbody>';
+
+    foreach ( $rows as $row ) {
+
+        echo '<tr>';
+
+        echo '<td>' .
+            esc_html( $row['term'] ) .
+            '</td>';
+
+        echo '<td>' .
+            esc_html(
+                number_format_i18n(
+                    $row['current_searches']
+                )
+            ) .
+            '</td>';
+
+        echo '<td>' .
+            esc_html(
+                number_format_i18n(
+                    $row['previous_searches']
+                )
+            ) .
+            '</td>';
+
+        echo '<td>' .
+            esc_html(
+                $row['growth_label']
+            ) .
+            '</td>';
+
+        echo '</tr>';
+    }
+
+    echo '</tbody></table>';
+    echo '</section>';
+}
 
     private static function render_search_table(
         $title,

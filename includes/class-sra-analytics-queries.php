@@ -4,17 +4,34 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-/**
- * Reporting queries for anonymous Knowledge Center analytics.
- */
 final class SRA_Analytics_Queries {
 
     public static function summary( $days ) {
+        $current = self::summary_between(
+            self::date_days_ago( $days ),
+            gmdate( 'Y-m-d H:i:s' )
+        );
+
+        $previous = self::summary_between(
+            self::date_days_ago( $days * 2 ),
+            self::date_days_ago( $days )
+        );
+
+        $current['search_change'] = self::percent_change(
+            $previous['searches'],
+            $current['searches']
+        );
+
+        $current['ctr_change'] = $current['ctr'] - $previous['ctr'];
+
+        return $current;
+    }
+
+    private static function summary_between( $start, $end ) {
 
         global $wpdb;
 
         $table = SRA_Search_Analytics::table_name();
-        $since = self::since_date( $days );
 
         $row = $wpdb->get_row(
             $wpdb->prepare(
@@ -26,8 +43,10 @@ final class SRA_Analytics_Queries {
                     AVG(result_count) AS avg_results
                 FROM {$table}
                 WHERE searched_at >= %s
+                  AND searched_at < %s
                 ",
-                $since
+                $start,
+                $end
             ),
             ARRAY_A
         ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -48,7 +67,7 @@ final class SRA_Analytics_Queries {
         global $wpdb;
 
         $table     = SRA_Search_Analytics::table_name();
-        $since     = self::since_date( $days );
+        $since     = self::date_days_ago( $days );
         $condition = $no_results ? 'AND result_count = 0' : '';
 
         $sql = $wpdb->prepare(
@@ -76,7 +95,7 @@ final class SRA_Analytics_Queries {
         global $wpdb;
 
         $table = SRA_Search_Analytics::table_name();
-        $since = self::since_date( $days );
+        $since = self::date_days_ago( $days );
 
         $sql = $wpdb->prepare(
             "
@@ -100,18 +119,12 @@ final class SRA_Analytics_Queries {
         return $wpdb->get_results( $sql, ARRAY_A );
     }
 
-    /**
-     * Searches that suggest missing or poorly matched content.
-     *
-     * Zero-result searches receive the highest unmet-need factor.
-     * Searches with results are flagged only when CTR is below 50%.
-     */
     public static function content_opportunities( $days ) {
 
         global $wpdb;
 
         $table = SRA_Search_Analytics::table_name();
-        $since = self::since_date( $days );
+        $since = self::date_days_ago( $days );
 
         $sql = $wpdb->prepare(
             "
@@ -133,7 +146,6 @@ final class SRA_Analytics_Queries {
         ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
         $rows = $wpdb->get_results( $sql, ARRAY_A );
-
         $opportunities = array();
 
         foreach ( $rows as $row ) {
@@ -167,7 +179,7 @@ final class SRA_Analytics_Queries {
 
         usort(
             $opportunities,
-            function ( $a, $b ) {
+            static function ( $a, $b ) {
                 if ( $a['score'] === $b['score'] ) {
                     return $b['searches'] <=> $a['searches'];
                 }
@@ -179,12 +191,103 @@ final class SRA_Analytics_Queries {
         return array_slice( $opportunities, 0, 12 );
     }
 
+    public static function trending_searches( $days ) {
+
+        global $wpdb;
+
+        $table = SRA_Search_Analytics::table_name();
+
+        $current_start  = self::date_days_ago( $days );
+        $previous_start = self::date_days_ago( $days * 2 );
+
+        $sql = $wpdb->prepare(
+            "
+            SELECT
+                term,
+                SUM(CASE WHEN searched_at >= %s THEN 1 ELSE 0 END) AS current_searches,
+                SUM(
+                    CASE
+                        WHEN searched_at >= %s AND searched_at < %s
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS previous_searches
+            FROM {$table}
+            WHERE searched_at >= %s
+            GROUP BY term
+            HAVING current_searches > 0
+            ORDER BY current_searches DESC
+            LIMIT 100
+            ",
+            $current_start,
+            $previous_start,
+            $current_start,
+            $previous_start
+        ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+        $rows = $wpdb->get_results( $sql, ARRAY_A );
+        $trending = array();
+
+        foreach ( $rows as $row ) {
+
+            $current  = absint( $row['current_searches'] );
+            $previous = absint( $row['previous_searches'] );
+
+            if ( $current < 2 ) {
+                continue;
+            }
+
+            if ( 0 === $previous ) {
+                $growth = null;
+                $label  = 'New';
+            } else {
+                $growth = self::percent_change( $previous, $current );
+
+                if ( $growth <= 0 ) {
+                    continue;
+                }
+
+                $label = number_format_i18n( $growth, 0 ) . '%';
+            }
+
+            $trending[] = array(
+                'term'              => $row['term'],
+                'current_searches'  => $current,
+                'previous_searches' => $previous,
+                'growth'            => $growth,
+                'growth_label'      => $label,
+            );
+        }
+
+        usort(
+            $trending,
+            static function ( $a, $b ) {
+
+                if ( null === $a['growth'] && null !== $b['growth'] ) {
+                    return -1;
+                }
+
+                if ( null !== $a['growth'] && null === $b['growth'] ) {
+                    return 1;
+                }
+
+                if ( $a['growth'] === $b['growth'] ) {
+                    return $b['current_searches'] <=> $a['current_searches'];
+                }
+
+                return $b['growth'] <=> $a['growth'];
+            }
+        );
+
+        return array_slice( $trending, 0, 12 );
+    }
+
     public static function top_clicked_articles( $days ) {
 
         global $wpdb;
 
         $table = SRA_Search_Analytics::table_name();
-        $since = self::since_date( $days );
+        $since = self::date_days_ago( $days );
 
         $sql = $wpdb->prepare(
             "
@@ -241,7 +344,7 @@ final class SRA_Analytics_Queries {
         global $wpdb;
 
         $table = SRA_Search_Analytics::table_name();
-        $since = self::since_date( $days );
+        $since = self::date_days_ago( $days );
 
         $sql = $wpdb->prepare(
             "
@@ -260,9 +363,21 @@ final class SRA_Analytics_Queries {
         return $wpdb->get_results( $sql, ARRAY_A );
     }
 
-    private static function since_date( $days ) {
+    private static function percent_change( $previous, $current ) {
 
-        $days = max( 1, absint( $days ) );
+        $previous = (float) $previous;
+        $current  = (float) $current;
+
+        if ( 0.0 === $previous ) {
+            return $current > 0 ? 100.0 : 0.0;
+        }
+
+        return ( ( $current - $previous ) / $previous ) * 100;
+    }
+
+    private static function date_days_ago( $days ) {
+
+        $days = max( 0, absint( $days ) );
 
         return gmdate(
             'Y-m-d H:i:s',
