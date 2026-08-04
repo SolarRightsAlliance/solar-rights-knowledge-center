@@ -1,21 +1,7 @@
 (function () {
     'use strict';
 
-    function clientSessionId() {
-        const key = 'sraKnowledgeCenterSession';
-        try {
-            let value = window.sessionStorage.getItem(key);
-            if (!value) {
-                value = (window.crypto && window.crypto.randomUUID)
-                    ? window.crypto.randomUUID()
-                    : Date.now().toString(36) + Math.random().toString(36).slice(2);
-                window.sessionStorage.setItem(key, value);
-            }
-            return value;
-        } catch (error) {
-            return '';
-        }
-    }
+   
 
     function initializeLiveSearch(search) {
         if (search.dataset.sraInitialized === 'true') return;
@@ -191,7 +177,7 @@
             url.searchParams.set('category', category);
             url.searchParams.set('nonce', sraSearchSettings.nonce);
             url.searchParams.set('source', window.location.href);
-            url.searchParams.set('client_session', clientSessionId());
+            
 
             try {
                 const response = await fetch(url.toString(), { signal: requestController.signal, credentials: 'same-origin' });

@@ -89,12 +89,11 @@ final class SRA_Search_Analytics {
     }
 
     public static function log_search(
-        $term,
-        $category,
-        $result_count,
-        $source_path,
-        $client_session
-    ) {
+    $term,
+    $category,
+    $result_count,
+    $source_path
+) {
 
         if ( ! self::enabled() ) {
             return '';
@@ -102,11 +101,10 @@ final class SRA_Search_Analytics {
 
         global $wpdb;
 
-        $token        = wp_generate_uuid4();
-        $term         = self::normalize_term( $term );
-        $category     = sanitize_title( $category );
-        $source_path  = self::sanitize_source_path( $source_path );
-        $session_hash = self::session_hash( $client_session );
+        $token       = wp_generate_uuid4();
+$term        = self::normalize_term( $term );
+$category    = sanitize_title( $category );
+$source_path = self::sanitize_source_path( $source_path );
 
         if ( '' === $term || '' === $category ) {
             return '';
@@ -124,17 +122,16 @@ final class SRA_Search_Analytics {
                     min( 65535, absint( $result_count ) )
                 ),
                 'source_path'  => $source_path,
-                'session_hash' => $session_hash,
+                
             ),
             array(
-                '%s',
-                '%s',
-                '%s',
-                '%s',
-                '%d',
-                '%s',
-                '%s',
-            )
+    '%s',
+    '%s',
+    '%s',
+    '%s',
+    '%d',
+    '%s',
+)
         );
 
         return false === $inserted
@@ -278,25 +275,5 @@ final class SRA_Search_Analytics {
             255
         );
     }
-
-    private static function session_hash( $client_session ) {
-
-        $client_session = sanitize_text_field(
-            (string) $client_session
-        );
-
-        if ( '' === $client_session ) {
-            return '';
-        }
-
-        return hash_hmac(
-            'sha256',
-            substr(
-                $client_session,
-                0,
-                100
-            ),
-            wp_salt( 'auth' )
-        );
-    }
 }
+    

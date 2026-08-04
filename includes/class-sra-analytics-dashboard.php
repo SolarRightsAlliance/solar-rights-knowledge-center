@@ -287,12 +287,7 @@ self::render_trending_table(
 
         </div>
 
-        .sra-kc-card-secondary {
-    display: block;
-    margin-top: 6px;
-    color: #646970;
-    font-size: 12px;
-}
+        
         <style>
             .sra-kc-cards {
                 display: grid;
@@ -314,6 +309,13 @@ self::render_trending_table(
                 font-size: 28px;
                 margin-top: 8px;
             }
+
+            .sra-kc-card-secondary {
+    display: block;
+    margin-top: 6px;
+    color: #646970;
+    font-size: 12px;
+}
 
             .sra-kc-grid {
                 display: grid;
