@@ -65,6 +65,7 @@ final class SRA_Search_Plugin {
         $atts = shortcode_atts(
             array(
                 'category'    => 'consumer-guide',
+                'post_types'  => 'post',
                 'placeholder' => 'Search...',
                 'no_results'  => 'No matching articles found.',
             ),
@@ -72,19 +73,52 @@ final class SRA_Search_Plugin {
             'sra_search'
         );
 
-        $category_slug = sanitize_title( $atts['category'] );
-        $category      = get_category_by_slug( $category_slug );
+        $category_slugs = $this->parse_category_slugs(
+            $atts['category']
+        );
 
-        if ( ! $category ) {
+        $category_ids = $this->category_ids_from_slugs(
+            $category_slugs
+        );
+
+        if (
+            empty( $category_slugs ) ||
+            count( $category_ids ) !== count( $category_slugs )
+        ) {
             return current_user_can( 'manage_options' )
                 ? '<p>' .
                     esc_html__(
-                        'Solar Rights Search: invalid category slug.',
+                        'Solar Rights Search: one or more category slugs are invalid.',
                         'solar-rights-search'
                     ) .
                     '</p>'
                 : '';
         }
+
+        $post_types = $this->parse_post_types(
+            $atts['post_types']
+        );
+
+        if ( empty( $post_types ) ) {
+            return current_user_can( 'manage_options' )
+                ? '<p>' .
+                    esc_html__(
+                        'Solar Rights Search: invalid post_types value.',
+                        'solar-rights-search'
+                    ) .
+                    '</p>'
+                : '';
+        }
+
+        $category_scope = implode(
+            ',',
+            $category_slugs
+        );
+
+        $post_type_scope = implode(
+            ',',
+            $post_types
+        );
 
         $max_results = absint(
             SRA_Search_Settings::get( 'max_results' )
@@ -117,7 +151,8 @@ final class SRA_Search_Plugin {
         <div
             id="<?php echo esc_attr( $search_id ); ?>"
             class="sra-live-search"
-            data-category="<?php echo esc_attr( $category_slug ); ?>"
+            data-category="<?php echo esc_attr( $category_scope ); ?>"
+            data-post-types="<?php echo esc_attr( $post_type_scope ); ?>"
             data-no-results="<?php echo esc_attr( $atts['no_results'] ); ?>"
         >
             <form
@@ -150,7 +185,13 @@ final class SRA_Search_Plugin {
                     <input
                         type="hidden"
                         name="category_scope"
-                        value="<?php echo esc_attr( $category_slug ); ?>"
+                        value="<?php echo esc_attr( $category_scope ); ?>"
+                    >
+
+                    <input
+                        type="hidden"
+                        name="post_type_scope"
+                        value="<?php echo esc_attr( $post_type_scope ); ?>"
                     >
 
                     <span
@@ -185,11 +226,17 @@ final class SRA_Search_Plugin {
             )
             : '';
 
-        $category_slug = isset( $_GET['category'] )
-            ? sanitize_title(
+        $category_raw = isset( $_GET['category'] )
+            ? sanitize_text_field(
                 wp_unslash( $_GET['category'] )
             )
             : '';
+
+        $post_types_raw = isset( $_GET['post_types'] )
+            ? sanitize_text_field(
+                wp_unslash( $_GET['post_types'] )
+            )
+            : 'post';
 
         $source_path = isset( $_GET['source'] )
             ? esc_url_raw(
@@ -211,9 +258,17 @@ final class SRA_Search_Plugin {
             );
         }
 
+        $category_slugs = $this->parse_category_slugs(
+            $category_raw
+        );
+
+        $category_ids = $this->category_ids_from_slugs(
+            $category_slugs
+        );
+
         if (
-            empty( $category_slug ) ||
-            ! get_category_by_slug( $category_slug )
+            empty( $category_slugs ) ||
+            count( $category_ids ) !== count( $category_slugs )
         ) {
             wp_send_json_error(
                 array(
@@ -225,6 +280,32 @@ final class SRA_Search_Plugin {
                 400
             );
         }
+
+        $post_types = $this->parse_post_types(
+            $post_types_raw
+        );
+
+        if ( empty( $post_types ) ) {
+            wp_send_json_error(
+                array(
+                    'message' => __(
+                        'Invalid search content type.',
+                        'solar-rights-search'
+                    ),
+                ),
+                400
+            );
+        }
+
+        $category_scope = implode(
+            ',',
+            $category_slugs
+        );
+
+        $post_type_scope = implode(
+            ',',
+            $post_types
+        );
 
         $options_hash = md5(
             wp_json_encode(
@@ -238,7 +319,11 @@ final class SRA_Search_Plugin {
             $options_hash .
             '|' .
             strtolower(
-                $category_slug . '|' . $term
+                $category_scope .
+                '|' .
+                $post_type_scope .
+                '|' .
+                $term
             )
         );
 
@@ -248,7 +333,8 @@ final class SRA_Search_Plugin {
 
             $results = $this->ranked_results(
                 $term,
-                $category_slug
+                $category_ids,
+                $post_types
             );
 
             set_transient(
@@ -260,7 +346,7 @@ final class SRA_Search_Plugin {
 
         $event_token = SRA_Search_Analytics::log_search(
             $term,
-            $category_slug,
+            $category_scope,
             count( $results ),
             $source_path
         );
@@ -349,7 +435,8 @@ final class SRA_Search_Plugin {
 
     private function ranked_results(
         $term,
-        $category_slug
+        $category_ids,
+        $post_types
     ) {
 
         $max_results = absint(
@@ -364,20 +451,61 @@ final class SRA_Search_Plugin {
             )
         );
 
-        $query = new WP_Query(
-            array(
-                'post_type'              => 'post',
-                'post_status'            => 'publish',
-                'posts_per_page'         => $fetch_limit,
-                'category_name'          => $category_slug,
-                'orderby'                => 'date',
-                'order'                  => 'DESC',
-                'ignore_sticky_posts'    => true,
-                'no_found_rows'          => true,
-                'update_post_meta_cache' => true,
-                'update_post_term_cache' => false,
-            )
-        );
+        $candidate_posts = array();
+
+        if ( in_array( 'post', $post_types, true ) ) {
+
+            $post_query = new WP_Query(
+                array(
+                    'post_type'              => 'post',
+                    'post_status'            => 'publish',
+                    'posts_per_page'         => $fetch_limit,
+                    'category__in'           => array_map(
+                        'absint',
+                        $category_ids
+                    ),
+                    'orderby'                => 'date',
+                    'order'                  => 'DESC',
+                    'ignore_sticky_posts'    => true,
+                    'no_found_rows'          => true,
+                    'update_post_meta_cache' => true,
+                    'update_post_term_cache' => false,
+                )
+            );
+
+            $candidate_posts = array_merge(
+                $candidate_posts,
+                $post_query->posts
+            );
+        }
+
+        if ( in_array( 'page', $post_types, true ) ) {
+
+            $page_query = new WP_Query(
+                array(
+                    'post_type'              => 'page',
+                    'post_status'            => 'publish',
+                    'posts_per_page'         => $fetch_limit,
+                    'meta_query'             => array(
+                        array(
+                            'key'     => SRA_Search_Content::META_KEY,
+                            'value'   => '1',
+                            'compare' => '=',
+                        ),
+                    ),
+                    'orderby'                => 'date',
+                    'order'                  => 'DESC',
+                    'no_found_rows'          => true,
+                    'update_post_meta_cache' => true,
+                    'update_post_term_cache' => false,
+                )
+            );
+
+            $candidate_posts = array_merge(
+                $candidate_posts,
+                $page_query->posts
+            );
+        }
 
         $original_terms = $this->normalize_terms(
             $term
@@ -387,9 +515,13 @@ final class SRA_Search_Plugin {
             $original_terms
         );
 
+        $priority_phrases = $this->matching_priority_phrases(
+            $term
+        );
+
         $scored = array();
 
-        foreach ( $query->posts as $post ) {
+        foreach ( $candidate_posts as $post ) {
 
             $post_id = (int) $post->ID;
 
@@ -412,6 +544,7 @@ final class SRA_Search_Plugin {
                 $term,
                 $original_terms,
                 $expanded_terms,
+                $priority_phrases,
                 $title,
                 $excerpt,
                 $content
@@ -486,6 +619,7 @@ final class SRA_Search_Plugin {
         $raw_term,
         $original_terms,
         $expanded_terms,
+        $priority_phrases,
         $title,
         $excerpt,
         $content
@@ -532,6 +666,36 @@ final class SRA_Search_Plugin {
             }
         }
 
+        foreach ( $priority_phrases as $priority_phrase ) {
+
+            if (
+                false !== strpos(
+                    $title_l,
+                    $priority_phrase
+                )
+            ) {
+                $score += 220;
+            }
+
+            if (
+                false !== strpos(
+                    $excerpt_l,
+                    $priority_phrase
+                )
+            ) {
+                $score += 90;
+            }
+
+            if (
+                false !== strpos(
+                    $content_l,
+                    $priority_phrase
+                )
+            ) {
+                $score += 35;
+            }
+        }
+
         foreach ( $original_terms as $search_term ) {
 
             $score += $this->field_score(
@@ -564,6 +728,65 @@ final class SRA_Search_Plugin {
         }
 
         return $score;
+    }
+
+    private function matching_priority_phrases(
+        $raw_term
+    ) {
+
+        $search = $this->lower(
+            trim( $raw_term )
+        );
+
+        if ( '' === $search ) {
+            return array();
+        }
+
+        $raw = (string) SRA_Search_Settings::get(
+            'priority_phrases'
+        );
+
+        $lines = preg_split(
+            '/\r\n|\r|\n/',
+            $raw
+        );
+
+        $matches = array();
+
+        foreach (
+            is_array( $lines )
+                ? $lines
+                : array()
+            as $line
+        ) {
+
+            $priority_phrase = $this->lower(
+                trim( $line )
+            );
+
+            if (
+                '' === $priority_phrase ||
+                false === strpos(
+                    $priority_phrase,
+                    ' '
+                )
+            ) {
+                continue;
+            }
+
+            if (
+                false !== strpos(
+                    $search,
+                    $priority_phrase
+                )
+            ) {
+                $matches[] = $priority_phrase;
+            }
+        }
+
+        return array_values(
+            array_unique( $matches )
+        );
     }
 
     private function field_score(
@@ -713,6 +936,90 @@ final class SRA_Search_Plugin {
         return $out;
     }
 
+    private function parse_category_slugs( $raw ) {
+
+        $parts = explode(
+            ',',
+            (string) $raw
+        );
+
+        $slugs = array();
+
+        foreach ( $parts as $part ) {
+
+            $slug = sanitize_title(
+                trim( $part )
+            );
+
+            if ( '' !== $slug ) {
+                $slugs[] = $slug;
+            }
+        }
+
+        return array_values(
+            array_unique( $slugs )
+        );
+    }
+
+    private function category_ids_from_slugs(
+        $slugs
+    ) {
+
+        $ids = array();
+
+        foreach ( $slugs as $slug ) {
+
+            $category = get_category_by_slug(
+                $slug
+            );
+
+            if ( $category ) {
+                $ids[] = (int) $category->term_id;
+            }
+        }
+
+        return array_values(
+            array_unique( $ids )
+        );
+    }
+
+    private function parse_post_types( $raw ) {
+
+        $parts = explode(
+            ',',
+            (string) $raw
+        );
+
+        $allowed = array(
+            'post',
+            'page',
+        );
+
+        $post_types = array();
+
+        foreach ( $parts as $part ) {
+
+            $post_type = sanitize_key(
+                trim( $part )
+            );
+
+            if (
+                '' !== $post_type &&
+                in_array(
+                    $post_type,
+                    $allowed,
+                    true
+                )
+            ) {
+                $post_types[] = $post_type;
+            }
+        }
+
+        return array_values(
+            array_unique( $post_types )
+        );
+    }
+
     private function plain_text( $value ) {
 
         return html_entity_decode(
@@ -769,17 +1076,87 @@ final class SRA_Search_Plugin {
             return;
         }
 
-        $category_slug = sanitize_title(
+        $category_raw = sanitize_text_field(
             wp_unslash(
                 $_GET['category_scope']
             )
         );
 
-        if (
-            ! get_category_by_slug(
-                $category_slug
+        $post_types_raw = isset(
+            $_GET['post_type_scope']
+        )
+            ? sanitize_text_field(
+                wp_unslash(
+                    $_GET['post_type_scope']
+                )
             )
+            : 'post';
+
+        $category_slugs = $this->parse_category_slugs(
+            $category_raw
+        );
+
+        $category_ids = $this->category_ids_from_slugs(
+            $category_slugs
+        );
+
+        $post_types = $this->parse_post_types(
+            $post_types_raw
+        );
+
+        if (
+            empty( $category_slugs ) ||
+            count( $category_ids ) !== count( $category_slugs ) ||
+            empty( $post_types )
         ) {
+            return;
+        }
+
+        if (
+            in_array( 'post', $post_types, true ) &&
+            in_array( 'page', $post_types, true )
+        ) {
+
+            $query->set(
+                'post_type',
+                array( 'post', 'page' )
+            );
+
+            $query->set(
+                'sra_category_ids',
+                $category_ids
+            );
+
+            add_filter(
+                'posts_clauses',
+                array(
+                    $this,
+                    'filter_mixed_search_clauses',
+                ),
+                10,
+                2
+            );
+
+            return;
+        }
+
+        if ( in_array( 'page', $post_types, true ) ) {
+
+            $query->set(
+                'post_type',
+                'page'
+            );
+
+            $query->set(
+                'meta_key',
+                SRA_Search_Content::META_KEY
+            );
+
+            $query->set(
+                'meta_value',
+                '1'
+            );
+
             return;
         }
 
@@ -789,8 +1166,97 @@ final class SRA_Search_Plugin {
         );
 
         $query->set(
-            'category_name',
-            $category_slug
+            'category__in',
+            $category_ids
         );
+    }
+
+    public function filter_mixed_search_clauses(
+        $clauses,
+        $query
+    ) {
+
+        if (
+            ! $query->is_main_query() ||
+            ! $query->is_search()
+        ) {
+            return $clauses;
+        }
+
+        $category_ids = $query->get(
+            'sra_category_ids'
+        );
+
+        if (
+            empty( $category_ids ) ||
+            ! is_array( $category_ids )
+        ) {
+            return $clauses;
+        }
+
+        global $wpdb;
+
+        $category_ids = array_map(
+            'absint',
+            $category_ids
+        );
+
+        $category_ids = array_filter(
+            $category_ids
+        );
+
+        if ( empty( $category_ids ) ) {
+            return $clauses;
+        }
+
+        $category_list = implode(
+            ',',
+            $category_ids
+        );
+
+        $meta_key = SRA_Search_Content::META_KEY;
+
+        $clauses['where'] .= "
+            AND (
+                (
+                    {$wpdb->posts}.post_type = 'post'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM {$wpdb->term_relationships} AS sra_tr
+                        INNER JOIN {$wpdb->term_taxonomy} AS sra_tt
+                            ON sra_tr.term_taxonomy_id = sra_tt.term_taxonomy_id
+                        WHERE
+                            sra_tr.object_id = {$wpdb->posts}.ID
+                            AND sra_tt.taxonomy = 'category'
+                            AND sra_tt.term_id IN ({$category_list})
+                    )
+                )
+                OR
+                (
+                    {$wpdb->posts}.post_type = 'page'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM {$wpdb->postmeta} AS sra_pm
+                        WHERE
+                            sra_pm.post_id = {$wpdb->posts}.ID
+                            AND sra_pm.meta_key = '" .
+                            esc_sql( $meta_key ) .
+                            "'
+                            AND sra_pm.meta_value = '1'
+                    )
+                )
+            )
+        ";
+
+        remove_filter(
+            'posts_clauses',
+            array(
+                $this,
+                'filter_mixed_search_clauses',
+            ),
+            10
+        );
+
+        return $clauses;
     }
 }
