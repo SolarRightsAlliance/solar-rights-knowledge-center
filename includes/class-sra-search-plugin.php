@@ -1,12 +1,6 @@
 <?php
 
-if ( ! defined( 'ABSPATH' ) ) {/*
- * An editorially assigned search term is an explicit signal that
- * this content is relevant to the visitor's query.
- */
-if ( ! empty( $editorial_search_terms ) ) {
-    return true;
-}
+if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
@@ -706,15 +700,23 @@ $post_query = new WP_Query(
     }
 
     private function passes_relevance_gate(
-    $meaningful_terms,
-    $active_synonym_groups,
-    $priority_phrases,
-    $editorial_search_terms,
-    $full_phrase,
-    $title,
-    $excerpt,
-    $content
-) {
+        $meaningful_terms,
+        $active_synonym_groups,
+        $priority_phrases,
+        $editorial_search_terms,
+        $full_phrase,
+        $title,
+        $excerpt,
+        $content
+    ) {
+
+        /*
+         * An editorially assigned search term is an explicit signal that
+         * this content is relevant to the visitor's query.
+         */
+        if ( ! empty( $editorial_search_terms ) ) {
+            return true;
+        }
 
         $combined = trim(
             $title .
