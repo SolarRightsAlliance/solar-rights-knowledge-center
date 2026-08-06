@@ -1,6 +1,12 @@
 <?php
 
-if ( ! defined( 'ABSPATH' ) ) {
+if ( ! defined( 'ABSPATH' ) ) {/*
+ * An editorially assigned search term is an explicit signal that
+ * this content is relevant to the visitor's query.
+ */
+if ( ! empty( $editorial_search_terms ) ) {
+    return true;
+}
     exit;
 }
 
@@ -163,6 +169,7 @@ final class SRA_Search_Plugin {
                 autocomplete="off"
             >
                 <div class="sra-live-search__input-wrap">
+
                     <label
                         class="screen-reader-text"
                         for="<?php echo esc_attr( $search_id ); ?>-input"
@@ -198,6 +205,7 @@ final class SRA_Search_Plugin {
                         class="sra-live-search__status"
                         aria-hidden="true"
                     ></span>
+
                 </div>
             </form>
 
@@ -327,7 +335,9 @@ final class SRA_Search_Plugin {
             )
         );
 
-        $results = get_transient( $cache_key );
+        $results = get_transient(
+            $cache_key
+        );
 
         if ( false === $results ) {
 
@@ -440,38 +450,52 @@ final class SRA_Search_Plugin {
     ) {
 
         $max_results = absint(
-            SRA_Search_Settings::get( 'max_results' )
-        );
-
-        $fetch_limit = min(
-            200,
-            max(
-                30,
-                $max_results * 10
+            SRA_Search_Settings::get(
+                'max_results'
             )
         );
 
+        /*
+         * Search all eligible content.
+         *
+         * Previously we only scored a limited set of the newest
+         * content. That could exclude older cornerstone guides before
+         * relevance scoring even began.
+         */
         $candidate_posts = array();
 
-        if ( in_array( 'post', $post_types, true ) ) {
+        if (
+            in_array(
+                'post',
+                $post_types,
+                true
+            )
+        ) {
 
-            $post_query = new WP_Query(
-                array(
-                    'post_type'              => 'post',
-                    'post_status'            => 'publish',
-                    'posts_per_page'         => $fetch_limit,
-                    'category__in'           => array_map(
-                        'absint',
-                        $category_ids
-                    ),
-                    'orderby'                => 'date',
-                    'order'                  => 'DESC',
-                    'ignore_sticky_posts'    => true,
-                    'no_found_rows'          => true,
-                    'update_post_meta_cache' => true,
-                    'update_post_term_cache' => false,
-                )
-            );
+$post_query = new WP_Query(
+    array(
+        'post_type'              => 'post',
+        'post_status'            => 'publish',
+        'posts_per_page'         => -1,
+        'category__in'           => array_map(
+            'absint',
+            $category_ids
+        ),
+        'meta_query'             => array(
+            array(
+                'key'     => SRA_Search_Content::META_KEY,
+                'value'   => '1',
+                'compare' => '=',
+            ),
+        ),
+        'orderby'                => 'date',
+        'order'                  => 'DESC',
+        'ignore_sticky_posts'    => true,
+        'no_found_rows'          => true,
+        'update_post_meta_cache' => true,
+        'update_post_term_cache' => false,
+    )
+);
 
             $candidate_posts = array_merge(
                 $candidate_posts,
@@ -479,13 +503,19 @@ final class SRA_Search_Plugin {
             );
         }
 
-        if ( in_array( 'page', $post_types, true ) ) {
+        if (
+            in_array(
+                'page',
+                $post_types,
+                true
+            )
+        ) {
 
             $page_query = new WP_Query(
                 array(
                     'post_type'              => 'page',
                     'post_status'            => 'publish',
-                    'posts_per_page'         => $fetch_limit,
+                    'posts_per_page'         => -1,
                     'meta_query'             => array(
                         array(
                             'key'     => SRA_Search_Content::META_KEY,
@@ -507,17 +537,28 @@ final class SRA_Search_Plugin {
             );
         }
 
-        $original_terms = $this->normalize_terms(
+        $meaningful_terms = $this->normalize_terms(
             $term
         );
 
-        $expanded_terms = $this->expanded_terms(
-            $original_terms
-        );
+        if ( empty( $meaningful_terms ) ) {
+            return array();
+        }
 
-        $priority_phrases = $this->matching_priority_phrases(
-            $term
-        );
+        $active_synonym_groups =
+            $this->active_synonym_groups(
+                $term
+            );
+
+        $priority_phrases =
+            $this->matching_priority_phrases(
+                $term
+            );
+
+        $full_phrase =
+            $this->normalize_search_text(
+                $term
+            );
 
         $scored = array();
 
@@ -526,11 +567,15 @@ final class SRA_Search_Plugin {
             $post_id = (int) $post->ID;
 
             $title = $this->plain_text(
-                get_the_title( $post_id )
+                get_the_title(
+                    $post_id
+                )
             );
 
             $excerpt = $this->plain_text(
-                get_the_excerpt( $post_id )
+                get_the_excerpt(
+                    $post_id
+                )
             );
 
             $content = $this->plain_text(
@@ -540,24 +585,59 @@ final class SRA_Search_Plugin {
                 )
             );
 
-            $score = $this->score_post(
-                $term,
-                $original_terms,
-                $expanded_terms,
-                $priority_phrases,
-                $title,
-                $excerpt,
+            $title_n = $this->normalize_search_text(
+                $title
+            );
+
+            $excerpt_n = $this->normalize_search_text(
+                $excerpt
+            );
+
+            $content_n = $this->normalize_search_text(
                 $content
             );
+
+            $editorial_search_terms =
+    $this->matching_content_search_terms(
+        $term,
+        $post_id
+    );
+
+            if (
+                ! $this->passes_relevance_gate(
+    $meaningful_terms,
+    $active_synonym_groups,
+    $priority_phrases,
+    $editorial_search_terms,
+    $full_phrase,
+    $title_n,
+    $excerpt_n,
+    $content_n
+)
+            ) {
+                continue;
+            }
+
+            $score = $this->score_post(
+    $full_phrase,
+    $meaningful_terms,
+    $active_synonym_groups,
+    $priority_phrases,
+    $editorial_search_terms,
+    $title_n,
+    $excerpt_n,
+    $content_n
+);
 
             if ( $score <= 0 ) {
                 continue;
             }
 
-            $thumbnail = get_the_post_thumbnail_url(
-                $post_id,
-                'thumbnail'
-            );
+            $thumbnail =
+                get_the_post_thumbnail_url(
+                    $post_id,
+                    'thumbnail'
+                );
 
             $scored[] = array(
                 'score'     => $score,
@@ -568,7 +648,9 @@ final class SRA_Search_Plugin {
                 ),
                 'title'     => $title,
                 'url'       => esc_url_raw(
-                    get_permalink( $post_id )
+                    get_permalink(
+                        $post_id
+                    )
                 ),
                 'excerpt'   => html_entity_decode(
                     wp_trim_words(
@@ -579,7 +661,9 @@ final class SRA_Search_Plugin {
                     'UTF-8'
                 ),
                 'thumbnail' => $thumbnail
-                    ? esc_url_raw( $thumbnail )
+                    ? esc_url_raw(
+                        $thumbnail
+                    )
                     : '',
             );
         }
@@ -588,11 +672,16 @@ final class SRA_Search_Plugin {
             $scored,
             static function ( $a, $b ) {
 
-                if ( $a['score'] === $b['score'] ) {
-                    return $b['date'] <=> $a['date'];
+                if (
+                    $a['score'] ===
+                    $b['score']
+                ) {
+                    return $b['date']
+                        <=> $a['date'];
                 }
 
-                return $b['score'] <=> $a['score'];
+                return $b['score']
+                    <=> $a['score'];
             }
         );
 
@@ -604,6 +693,7 @@ final class SRA_Search_Plugin {
 
         return array_map(
             static function ( $item ) {
+
                 unset(
                     $item['score'],
                     $item['date']
@@ -615,230 +705,437 @@ final class SRA_Search_Plugin {
         );
     }
 
-    private function score_post(
-        $raw_term,
-        $original_terms,
-        $expanded_terms,
-        $priority_phrases,
-        $title,
-        $excerpt,
-        $content
-    ) {
+    private function passes_relevance_gate(
+    $meaningful_terms,
+    $active_synonym_groups,
+    $priority_phrases,
+    $editorial_search_terms,
+    $full_phrase,
+    $title,
+    $excerpt,
+    $content
+) {
 
-        $title_l   = $this->lower( $title );
-        $excerpt_l = $this->lower( $excerpt );
-        $content_l = $this->lower( $content );
-        $phrase    = $this->lower(
-            trim( $raw_term )
+        $combined = trim(
+            $title .
+            ' ' .
+            $excerpt .
+            ' ' .
+            $content
         );
 
-        $score = 0;
-
-        if ( '' !== $phrase ) {
-
-            if ( $title_l === $phrase ) {
-                $score += 250;
-            } elseif (
-                false !== strpos(
-                    $title_l,
-                    $phrase
-                )
-            ) {
-                $score += 140;
-            }
-
-            if (
-                false !== strpos(
-                    $excerpt_l,
-                    $phrase
-                )
-            ) {
-                $score += 55;
-            }
-
-            if (
-                false !== strpos(
-                    $content_l,
-                    $phrase
-                )
-            ) {
-                $score += 20;
-            }
+        /*
+         * A literal match of the visitor's complete normalized query
+         * is always strongly relevant.
+         */
+        if (
+            '' !== $full_phrase &&
+            $this->contains_phrase(
+                $combined,
+                $full_phrase
+            )
+        ) {
+            return true;
         }
 
-        foreach ( $priority_phrases as $priority_phrase ) {
-
-            if (
-                false !== strpos(
-                    $title_l,
-                    $priority_phrase
-                )
-            ) {
-                $score += 220;
-            }
-
-            if (
-                false !== strpos(
-                    $excerpt_l,
-                    $priority_phrase
-                )
-            ) {
-                $score += 90;
-            }
-
-            if (
-                false !== strpos(
-                    $content_l,
-                    $priority_phrase
-                )
-            ) {
-                $score += 35;
-            }
-        }
-
-        foreach ( $original_terms as $search_term ) {
-
-            $score += $this->field_score(
-                $search_term,
-                $title_l,
-                $excerpt_l,
-                $content_l,
-                60,
-                24,
-                8
-            );
-        }
-
+        /*
+         * Matching a configured priority phrase is also sufficient.
+         */
         foreach (
-            array_diff(
-                $expanded_terms,
-                $original_terms
-            ) as $synonym
+            $priority_phrases as $phrase
         ) {
 
-            $score += $this->field_score(
-                $synonym,
-                $title_l,
-                $excerpt_l,
-                $content_l,
-                28,
-                12,
-                4
-            );
+            if (
+                $this->contains_phrase(
+                    $combined,
+                    $phrase
+                )
+            ) {
+                return true;
+            }
         }
 
-        return $score;
-    }
-
-    private function matching_priority_phrases(
-        $raw_term
-    ) {
-
-        $search = $this->lower(
-            trim( $raw_term )
-        );
-
-        if ( '' === $search ) {
-            return array();
-        }
-
-        $raw = (string) SRA_Search_Settings::get(
-            'priority_phrases'
-        );
-
-        $lines = preg_split(
-            '/\r\n|\r|\n/',
-            $raw
-        );
-
-        $matches = array();
+        $matched_terms = 0;
 
         foreach (
-            is_array( $lines )
-                ? $lines
-                : array()
-            as $line
+            $meaningful_terms as $term
         ) {
 
-            $priority_phrase = $this->lower(
-                trim( $line )
-            );
+            if (
+                $this->field_contains(
+                    $term,
+                    $combined
+                )
+            ) {
+                $matched_terms++;
+            }
+        }
+
+        $term_count = count(
+            $meaningful_terms
+        );
+
+        /*
+         * One meaningful-term searches need one concept match.
+         *
+         * Searches with two or more meaningful terms normally need at
+         * least two concepts to match. This prevents "plug in solar"
+         * from returning generic articles that only contain "solar."
+         */
+        $required_matches =
+            $term_count >= 2
+                ? 2
+                : 1;
+
+        if (
+            $matched_terms >=
+            $required_matches
+        ) {
+            return true;
+        }
+
+        /*
+         * A recognized multi-word synonym can represent the complete
+         * concept even when it uses different vocabulary.
+         *
+         * Example:
+         *   plug in solar -> balcony solar
+         *
+         * Single-word synonym triggers such as "battery" do not bypass
+         * the two-concept requirement for a query such as
+         * "buy a battery."
+         */
+        foreach (
+            $active_synonym_groups as $group
+        ) {
 
             if (
-                '' === $priority_phrase ||
-                false === strpos(
-                    $priority_phrase,
-                    ' '
+                empty(
+                    $group['strong_trigger']
                 )
             ) {
                 continue;
             }
 
-            if (
-                false !== strpos(
-                    $search,
-                    $priority_phrase
-                )
+            foreach (
+                $group['phrases'] as $phrase
             ) {
-                $matches[] = $priority_phrase;
+
+                if (
+                    $this->contains_phrase(
+                        $combined,
+                        $phrase
+                    )
+                ) {
+                    return true;
+                }
             }
         }
 
-        return array_values(
-            array_unique( $matches )
-        );
+        /*
+         * For a one-concept search, ordinary synonym equivalents are
+         * allowed to satisfy relevance.
+         *
+         * Example:
+         *   battery -> storage
+         */
+        if ( 1 === $term_count ) {
+
+            foreach (
+                $active_synonym_groups as $group
+            ) {
+
+                foreach (
+                    $group['phrases'] as $phrase
+                ) {
+
+                    if (
+                        $this->contains_phrase(
+                            $combined,
+                            $phrase
+                        )
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
-    private function field_score(
-        $term,
-        $title,
-        $excerpt,
-        $content,
-        $title_weight,
-        $excerpt_weight,
-        $content_weight
+    private function score_post(
+    $full_phrase,
+    $meaningful_terms,
+    $active_synonym_groups,
+    $priority_phrases,
+    $editorial_search_terms,
+    $title,
+    $excerpt,
+    $content
+) {
+
+    $score = 0;
+
+    /*
+     * Editorial search terms are our strongest ranking signal.
+     *
+     * These allow an editor to explicitly say that a particular
+     * resource is a preferred destination for a visitor intent such
+     * as "installer" or "solar company".
+     */
+    if ( ! empty( $editorial_search_terms ) ) {
+
+        $score += 700;
+
+        if ( count( $editorial_search_terms ) > 1 ) {
+            $score += (
+                count( $editorial_search_terms ) - 1
+            ) * 50;
+        }
+    }
+
+    /*
+     * Complete visitor search phrase.
+     */
+    if ( '' !== $full_phrase ) {
+
+        if ( $title === $full_phrase ) {
+
+            $score += 300;
+
+        } elseif (
+            $this->contains_phrase(
+                $title,
+                $full_phrase
+            )
+        ) {
+
+            $score += 180;
+        }
+
+        if (
+            $this->contains_phrase(
+                $excerpt,
+                $full_phrase
+            )
+        ) {
+            $score += 75;
+        }
+
+        if (
+            $this->contains_phrase(
+                $content,
+                $full_phrase
+            )
+        ) {
+            $score += 30;
+        }
+    }
+
+    /*
+     * Administrator-configured global priority phrases.
+     */
+    foreach (
+        $priority_phrases as $phrase
     ) {
 
-        $score = 0;
-
-        if ( false !== strpos( $title, $term ) ) {
-            $score += $title_weight;
-        }
-
-        if ( false !== strpos( $excerpt, $term ) ) {
-            $score += $excerpt_weight;
-        }
-
-        if ( false !== strpos( $content, $term ) ) {
-            $score += $content_weight;
-        }
-
-        return $score;
-    }
-
-    private function normalize_terms( $term ) {
-
-        $parts = preg_split(
-            '/\s+/',
-            $this->lower( $term )
-        );
-
-        $parts = array_filter(
-            array_map(
-                'trim',
-                is_array( $parts )
-                    ? $parts
-                    : array()
+        if (
+            $this->contains_phrase(
+                $title,
+                $phrase
             )
-        );
+        ) {
+            $score += 240;
+        }
 
-        return array_values(
-            array_unique( $parts )
+        if (
+            $this->contains_phrase(
+                $excerpt,
+                $phrase
+            )
+        ) {
+            $score += 100;
+        }
+
+        if (
+            $this->contains_phrase(
+                $content,
+                $phrase
+            )
+        ) {
+            $score += 40;
+        }
+    }
+
+    /*
+     * Score meaningful visitor terms that are not already represented
+     * by an activated synonym group.
+     */
+    foreach (
+        $meaningful_terms as $term
+    ) {
+
+        if (
+            $this->term_is_covered_by_synonym_group(
+                $term,
+                $active_synonym_groups
+            )
+        ) {
+            continue;
+        }
+
+        $score += $this->field_score(
+            $term,
+            $title,
+            $excerpt,
+            $content,
+            70,
+            30,
+            10
         );
     }
 
-    private function expanded_terms(
-        $original_terms
+    /*
+     * Treat every member of an activated synonym group as equivalent.
+     *
+     * We take the BEST matching member rather than adding weaker
+     * synonym points on top of the literal word.
+     *
+     * Therefore:
+     *
+     * battery
+     * storage
+     * energy storage
+     * home battery
+     *
+     * all represent the same search concept.
+     */
+    foreach (
+        $active_synonym_groups as $group
+    ) {
+
+        $best_group_score = 0;
+
+        foreach (
+            $group['phrases'] as $phrase
+        ) {
+
+            $phrase_score =
+                $this->field_score(
+                    $phrase,
+                    $title,
+                    $excerpt,
+                    $content,
+                    70,
+                    30,
+                    10
+                );
+
+            $best_group_score = max(
+                $best_group_score,
+                $phrase_score
+            );
+        }
+
+        $score += $best_group_score;
+    }
+
+    return $score;
+}
+
+private function matching_content_search_terms(
+    $raw_term,
+    $post_id
+) {
+
+    $search = $this->normalize_search_text(
+        $raw_term
+    );
+
+    if ( '' === $search ) {
+        return array();
+    }
+
+    $raw =
+        SRA_Search_Content::get_priority_search_terms_raw(
+            $post_id
+        );
+
+    if ( '' === trim( $raw ) ) {
+        return array();
+    }
+
+    $lines = preg_split(
+        '/\r\n|\r|\n/',
+        $raw
+    );
+
+    $matches = array();
+
+    foreach (
+        is_array( $lines )
+            ? $lines
+            : array()
+        as $line
+    ) {
+
+        $phrase =
+            $this->normalize_search_text(
+                $line
+            );
+
+        if ( '' === $phrase ) {
+            continue;
+        }
+
+        if (
+            $this->field_contains(
+                $phrase,
+                $search
+            )
+        ) {
+            $matches[] = $phrase;
+        }
+    }
+
+    return array_values(
+        array_unique(
+            $matches
+        )
+    );
+}
+
+private function term_is_covered_by_synonym_group(
+    $term,
+    $active_synonym_groups
+) {
+
+    foreach (
+        $active_synonym_groups as $group
+    ) {
+
+        $trigger_terms =
+            $this->meaningful_phrase_terms(
+                $group['trigger']
+            );
+
+        if (
+            in_array(
+                $term,
+                $trigger_terms,
+                true
+            )
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+    private function active_synonym_groups(
+        $raw_term
     ) {
 
         if (
@@ -846,59 +1143,69 @@ final class SRA_Search_Plugin {
                 'enable_synonyms'
             )
         ) {
-            return $original_terms;
+            return array();
         }
 
-        $expanded = $original_terms;
-        $groups   = $this->synonym_groups();
+        $search =
+            $this->normalize_search_text(
+                $raw_term
+            );
+
+        if ( '' === $search ) {
+            return array();
+        }
+
+        $groups =
+            $this->synonym_groups();
+
+        $active = array();
 
         foreach ( $groups as $group ) {
 
-            $intersects = false;
+            $trigger = '';
 
-            foreach ( $group as $candidate ) {
+            foreach (
+                $group as $candidate
+            ) {
 
-                foreach (
-                    $original_terms as $original
+                if (
+                    $this->contains_phrase(
+                        $search,
+                        $candidate
+                    )
                 ) {
-
-                    if (
-                        $candidate === $original ||
-                        false !== strpos(
-                            $candidate,
-                            $original
-                        ) ||
-                        false !== strpos(
-                            $original,
-                            $candidate
-                        )
-                    ) {
-                        $intersects = true;
-                        break 2;
-                    }
+                    $trigger = $candidate;
+                    break;
                 }
             }
 
-            if ( $intersects ) {
-                $expanded = array_merge(
-                    $expanded,
-                    $group
-                );
+            if ( '' === $trigger ) {
+                continue;
             }
+
+            $trigger_terms =
+                $this->meaningful_phrase_terms(
+                    $trigger
+                );
+
+            $active[] = array(
+                'phrases'        => $group,
+                'trigger'        => $trigger,
+                'strong_trigger' => count(
+                    $trigger_terms
+                ) >= 2,
+            );
         }
 
-        return array_values(
-            array_unique(
-                array_filter( $expanded )
-            )
-        );
+        return $active;
     }
 
     private function synonym_groups() {
 
-        $raw = (string) SRA_Search_Settings::get(
-            'synonym_groups'
-        );
+        $raw = (string)
+            SRA_Search_Settings::get(
+                'synonym_groups'
+            );
 
         $lines = preg_split(
             '/\r\n|\r|\n/',
@@ -914,29 +1221,399 @@ final class SRA_Search_Plugin {
             as $line
         ) {
 
-            $items = array_map(
-                array( $this, 'lower' ),
-                array_map(
-                    'trim',
-                    explode( '|', $line )
-                )
+            $items = explode(
+                '|',
+                $line
             );
 
-            $items = array_values(
-                array_unique(
-                    array_filter( $items )
-                )
-            );
+            $normalized = array();
 
-            if ( count( $items ) >= 2 ) {
-                $out[] = $items;
+            foreach (
+                $items as $item
+            ) {
+
+                $phrase =
+                    $this->normalize_search_text(
+                        $item
+                    );
+
+                if ( '' !== $phrase ) {
+                    $normalized[] =
+                        $phrase;
+                }
+            }
+
+            $normalized =
+                array_values(
+                    array_unique(
+                        $normalized
+                    )
+                );
+
+            if (
+                count(
+                    $normalized
+                ) >= 2
+            ) {
+                $out[] = $normalized;
             }
         }
 
         return $out;
     }
 
-    private function parse_category_slugs( $raw ) {
+    private function matching_priority_phrases(
+        $raw_term
+    ) {
+
+        $search =
+            $this->normalize_search_text(
+                $raw_term
+            );
+
+        if ( '' === $search ) {
+            return array();
+        }
+
+        $raw = (string)
+            SRA_Search_Settings::get(
+                'priority_phrases'
+            );
+
+        $lines = preg_split(
+            '/\r\n|\r|\n/',
+            $raw
+        );
+
+        $matches = array();
+
+        foreach (
+            is_array( $lines )
+                ? $lines
+                : array()
+            as $line
+        ) {
+
+            $phrase =
+                $this->normalize_search_text(
+                    $line
+                );
+
+            if ( '' === $phrase ) {
+                continue;
+            }
+
+            if (
+                $this->contains_phrase(
+                    $search,
+                    $phrase
+                )
+            ) {
+                $matches[] =
+                    $phrase;
+            }
+        }
+
+        return array_values(
+            array_unique(
+                $matches
+            )
+        );
+    }
+
+    private function field_score(
+        $term,
+        $title,
+        $excerpt,
+        $content,
+        $title_weight,
+        $excerpt_weight,
+        $content_weight
+    ) {
+
+        $score = 0;
+
+        if (
+            $this->field_contains(
+                $term,
+                $title
+            )
+        ) {
+            $score += $title_weight;
+        }
+
+        if (
+            $this->field_contains(
+                $term,
+                $excerpt
+            )
+        ) {
+            $score += $excerpt_weight;
+        }
+
+        if (
+            $this->field_contains(
+                $term,
+                $content
+            )
+        ) {
+            $score += $content_weight;
+        }
+
+        return $score;
+    }
+
+    private function field_contains(
+        $needle,
+        $text
+    ) {
+
+        $needle =
+            $this->normalize_search_text(
+                $needle
+            );
+
+        if (
+            '' === $needle ||
+            '' === $text
+        ) {
+            return false;
+        }
+
+        /*
+         * Multi-word values must match as a complete phrase.
+         */
+        if (
+            false !== strpos(
+                $needle,
+                ' '
+            )
+        ) {
+            return $this->contains_phrase(
+                $text,
+                $needle
+            );
+        }
+
+        /*
+         * Single words may match natural suffixes.
+         *
+         * Examples:
+         *   buy -> buying
+         *   tax -> taxes
+         */
+        $pattern =
+            '/(?:^|\s)' .
+            preg_quote(
+                $needle,
+                '/'
+            ) .
+            '[\p{L}\p{N}]*/u';
+
+        return 1 === preg_match(
+            $pattern,
+            $text
+        );
+    }
+
+    private function contains_phrase(
+        $text,
+        $phrase
+    ) {
+
+        $text =
+            $this->normalize_search_text(
+                $text
+            );
+
+        $phrase =
+            $this->normalize_search_text(
+                $phrase
+            );
+
+        if (
+            '' === $text ||
+            '' === $phrase
+        ) {
+            return false;
+        }
+
+        return false !== strpos(
+            ' ' . $text . ' ',
+            ' ' . $phrase . ' '
+        );
+    }
+
+    private function normalize_terms(
+        $term
+    ) {
+
+        $normalized =
+            $this->normalize_search_text(
+                $term
+            );
+
+        if ( '' === $normalized ) {
+            return array();
+        }
+
+        $parts = preg_split(
+            '/\s+/',
+            $normalized
+        );
+
+        $stop_words =
+            $this->stop_words();
+
+        $terms = array();
+
+        foreach (
+            is_array( $parts )
+                ? $parts
+                : array()
+            as $part
+        ) {
+
+            $part = trim(
+                $part
+            );
+
+            if (
+                '' === $part ||
+                in_array(
+                    $part,
+                    $stop_words,
+                    true
+                )
+            ) {
+                continue;
+            }
+
+            $terms[] = $part;
+        }
+
+        return array_values(
+            array_unique(
+                $terms
+            )
+        );
+    }
+
+    private function meaningful_phrase_terms(
+        $phrase
+    ) {
+
+        return $this->normalize_terms(
+            $phrase
+        );
+    }
+
+    private function stop_words() {
+
+        return array(
+            'a',
+            'an',
+            'and',
+            'are',
+            'as',
+            'at',
+            'be',
+            'been',
+            'being',
+            'but',
+            'by',
+            'can',
+            'could',
+            'did',
+            'do',
+            'does',
+            'for',
+            'from',
+            'had',
+            'has',
+            'have',
+            'how',
+            'i',
+            'if',
+            'in',
+            'into',
+            'is',
+            'it',
+            'me',
+            'my',
+            'of',
+            'on',
+            'or',
+            'our',
+            'should',
+            'that',
+            'the',
+            'their',
+            'them',
+            'they',
+            'this',
+            'to',
+            'was',
+            'we',
+            'were',
+            'what',
+            'when',
+            'where',
+            'which',
+            'who',
+            'why',
+            'will',
+            'with',
+            'would',
+            'you',
+            'your',
+        );
+    }
+
+    private function normalize_search_text(
+        $value
+    ) {
+
+        $value = html_entity_decode(
+            wp_strip_all_tags(
+                (string) $value
+            ),
+            ENT_QUOTES | ENT_HTML5,
+            'UTF-8'
+        );
+
+        $value = $this->lower(
+            $value
+        );
+
+        /*
+         * Convert punctuation, hyphens, apostrophes, question marks,
+         * etc. into spaces so searches compare consistently.
+         *
+         * Examples:
+         *   battery?       -> battery
+         *   plug-in solar  -> plug in solar
+         */
+        $value = preg_replace(
+            '/[^\p{L}\p{N}]+/u',
+            ' ',
+            $value
+        );
+
+        $value = trim(
+            preg_replace(
+                '/\s+/u',
+                ' ',
+                (string) $value
+            )
+        );
+
+        return $value;
+    }
+
+    private function parse_category_slugs(
+        $raw
+    ) {
 
         $parts = explode(
             ',',
@@ -945,7 +1622,9 @@ final class SRA_Search_Plugin {
 
         $slugs = array();
 
-        foreach ( $parts as $part ) {
+        foreach (
+            $parts as $part
+        ) {
 
             $slug = sanitize_title(
                 trim( $part )
@@ -957,7 +1636,9 @@ final class SRA_Search_Plugin {
         }
 
         return array_values(
-            array_unique( $slugs )
+            array_unique(
+                $slugs
+            )
         );
     }
 
@@ -967,23 +1648,32 @@ final class SRA_Search_Plugin {
 
         $ids = array();
 
-        foreach ( $slugs as $slug ) {
+        foreach (
+            $slugs as $slug
+        ) {
 
-            $category = get_category_by_slug(
-                $slug
-            );
+            $category =
+                get_category_by_slug(
+                    $slug
+                );
 
             if ( $category ) {
-                $ids[] = (int) $category->term_id;
+                $ids[] =
+                    (int)
+                    $category->term_id;
             }
         }
 
         return array_values(
-            array_unique( $ids )
+            array_unique(
+                $ids
+            )
         );
     }
 
-    private function parse_post_types( $raw ) {
+    private function parse_post_types(
+        $raw
+    ) {
 
         $parts = explode(
             ',',
@@ -997,11 +1687,14 @@ final class SRA_Search_Plugin {
 
         $post_types = array();
 
-        foreach ( $parts as $part ) {
+        foreach (
+            $parts as $part
+        ) {
 
-            $post_type = sanitize_key(
-                trim( $part )
-            );
+            $post_type =
+                sanitize_key(
+                    trim( $part )
+                );
 
             if (
                 '' !== $post_type &&
@@ -1011,16 +1704,21 @@ final class SRA_Search_Plugin {
                     true
                 )
             ) {
-                $post_types[] = $post_type;
+                $post_types[] =
+                    $post_type;
             }
         }
 
         return array_values(
-            array_unique( $post_types )
+            array_unique(
+                $post_types
+            )
         );
     }
 
-    private function plain_text( $value ) {
+    private function plain_text(
+        $value
+    ) {
 
         return html_entity_decode(
             wp_strip_all_tags(
@@ -1031,9 +1729,13 @@ final class SRA_Search_Plugin {
         );
     }
 
-    private function lower( $value ) {
+    private function lower(
+        $value
+    ) {
 
-        return function_exists( 'mb_strtolower' )
+        return function_exists(
+            'mb_strtolower'
+        )
             ? mb_strtolower(
                 (string) $value,
                 'UTF-8'
@@ -1043,7 +1745,9 @@ final class SRA_Search_Plugin {
             );
     }
 
-    private function is_local_url( $url ) {
+    private function is_local_url(
+        $url
+    ) {
 
         if ( '' === $url ) {
             return false;
@@ -1061,65 +1765,93 @@ final class SRA_Search_Plugin {
 
         return $url_host &&
             $home_host &&
-            strtolower( $url_host ) ===
-            strtolower( $home_host );
+            strtolower(
+                $url_host
+            ) ===
+            strtolower(
+                $home_host
+            );
     }
 
-    public function filter_main_query( $query ) {
+    public function filter_main_query(
+        $query
+    ) {
 
         if (
             is_admin() ||
             ! $query->is_main_query() ||
             ! $query->is_search() ||
-            empty( $_GET['category_scope'] )
+            empty(
+                $_GET['category_scope']
+            )
         ) {
             return;
         }
 
-        $category_raw = sanitize_text_field(
-            wp_unslash(
-                $_GET['category_scope']
-            )
-        );
+        $category_raw =
+            sanitize_text_field(
+                wp_unslash(
+                    $_GET[
+                        'category_scope'
+                    ]
+                )
+            );
 
         $post_types_raw = isset(
             $_GET['post_type_scope']
         )
             ? sanitize_text_field(
                 wp_unslash(
-                    $_GET['post_type_scope']
+                    $_GET[
+                        'post_type_scope'
+                    ]
                 )
             )
             : 'post';
 
-        $category_slugs = $this->parse_category_slugs(
-            $category_raw
-        );
+        $category_slugs =
+            $this->parse_category_slugs(
+                $category_raw
+            );
 
-        $category_ids = $this->category_ids_from_slugs(
-            $category_slugs
-        );
+        $category_ids =
+            $this->category_ids_from_slugs(
+                $category_slugs
+            );
 
-        $post_types = $this->parse_post_types(
-            $post_types_raw
-        );
+        $post_types =
+            $this->parse_post_types(
+                $post_types_raw
+            );
 
         if (
             empty( $category_slugs ) ||
-            count( $category_ids ) !== count( $category_slugs ) ||
+            count( $category_ids ) !==
+                count( $category_slugs ) ||
             empty( $post_types )
         ) {
             return;
         }
 
         if (
-            in_array( 'post', $post_types, true ) &&
-            in_array( 'page', $post_types, true )
+            in_array(
+                'post',
+                $post_types,
+                true
+            ) &&
+            in_array(
+                'page',
+                $post_types,
+                true
+            )
         ) {
 
             $query->set(
                 'post_type',
-                array( 'post', 'page' )
+                array(
+                    'post',
+                    'page',
+                )
             );
 
             $query->set(
@@ -1140,7 +1872,13 @@ final class SRA_Search_Plugin {
             return;
         }
 
-        if ( in_array( 'page', $post_types, true ) ) {
+        if (
+            in_array(
+                'page',
+                $post_types,
+                true
+            )
+        ) {
 
             $query->set(
                 'post_type',
@@ -1169,6 +1907,17 @@ final class SRA_Search_Plugin {
             'category__in',
             $category_ids
         );
+
+$query->set(
+    'meta_key',
+    SRA_Search_Content::META_KEY
+);
+
+$query->set(
+    'meta_value',
+    '1'
+);
+
     }
 
     public function filter_mixed_search_clauses(
@@ -1183,13 +1932,16 @@ final class SRA_Search_Plugin {
             return $clauses;
         }
 
-        $category_ids = $query->get(
-            'sra_category_ids'
-        );
+        $category_ids =
+            $query->get(
+                'sra_category_ids'
+            );
 
         if (
             empty( $category_ids ) ||
-            ! is_array( $category_ids )
+            ! is_array(
+                $category_ids
+            )
         ) {
             return $clauses;
         }
@@ -1205,7 +1957,11 @@ final class SRA_Search_Plugin {
             $category_ids
         );
 
-        if ( empty( $category_ids ) ) {
+        if (
+            empty(
+                $category_ids
+            )
+        ) {
             return $clauses;
         }
 
@@ -1214,23 +1970,38 @@ final class SRA_Search_Plugin {
             $category_ids
         );
 
-        $meta_key = SRA_Search_Content::META_KEY;
+        $meta_key =
+            SRA_Search_Content::META_KEY;
 
         $clauses['where'] .= "
             AND (
-                (
-                    {$wpdb->posts}.post_type = 'post'
-                    AND EXISTS (
-                        SELECT 1
-                        FROM {$wpdb->term_relationships} AS sra_tr
-                        INNER JOIN {$wpdb->term_taxonomy} AS sra_tt
-                            ON sra_tr.term_taxonomy_id = sra_tt.term_taxonomy_id
-                        WHERE
-                            sra_tr.object_id = {$wpdb->posts}.ID
-                            AND sra_tt.taxonomy = 'category'
-                            AND sra_tt.term_id IN ({$category_list})
-                    )
-                )
+                
+(
+    {$wpdb->posts}.post_type = 'post'
+    AND EXISTS (
+        SELECT 1
+        FROM {$wpdb->term_relationships} AS sra_tr
+        INNER JOIN {$wpdb->term_taxonomy} AS sra_tt
+            ON sra_tr.term_taxonomy_id = sra_tt.term_taxonomy_id
+        WHERE
+            sra_tr.object_id = {$wpdb->posts}.ID
+            AND sra_tt.taxonomy = 'category'
+            AND sra_tt.term_id IN ({$category_list})
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM {$wpdb->postmeta} AS sra_post_pm
+        WHERE
+            sra_post_pm.post_id = {$wpdb->posts}.ID
+            AND sra_post_pm.meta_key = '" .
+            esc_sql(
+                $meta_key
+            ) .
+            "'
+            AND sra_post_pm.meta_value = '1'
+    )
+)
+
                 OR
                 (
                     {$wpdb->posts}.post_type = 'page'
@@ -1240,7 +2011,9 @@ final class SRA_Search_Plugin {
                         WHERE
                             sra_pm.post_id = {$wpdb->posts}.ID
                             AND sra_pm.meta_key = '" .
-                            esc_sql( $meta_key ) .
+                            esc_sql(
+                                $meta_key
+                            ) .
                             "'
                             AND sra_pm.meta_value = '1'
                     )
