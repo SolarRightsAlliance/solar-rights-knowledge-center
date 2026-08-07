@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.3.7
+- Finalize `[sra_knowledge_video]` shortcode for embedding the Knowledge Video associated with a Consumer Guide post.
+- Use the actual `knowledge-video` custom post type key.
+- Support ACF bidirectional relationship lookup with forward-relationship fallback.
+- Support YouTube watch, Shorts, youtu.be, and embed URLs.
+- Remove temporary admin-only Knowledge Video debug shortcode.
+- No Knowledge Center search behavior changes.
+
+## 1.3.6
+- Fix Knowledge Video shortcode to use the actual custom post type key `knowledge-video`.
+- Keep the temporary admin-only debug shortcode available for verification.
+- No Knowledge Center search behavior changes.
+
+## 1.3.4
+- Make `[sra_knowledge_video]` use the actual queried article ID when Elementor changes the global post context.
+- Read ACF relationship values through ACF when available, with post-meta fallback.
+- Add a reverse-query fallback using `related_consumer_guide_article` so the embed still works if the bidirectional article field is unavailable.
+- No Knowledge Center search behavior changes.
+
+## 1.3.3
+- Add `[sra_knowledge_video]` shortcode for embedding the Knowledge Video associated with a Consumer Guide post.
+- Read the bidirectional `knowledge_video` ACF field and the selected Knowledge Video's `youtube_url`.
+- Support YouTube watch, Shorts, youtu.be, and embed URLs.
+- Render nothing when no published Knowledge Video is associated with the current post.
+- Add compact responsive video styling without changing Knowledge Center search behavior.
+
 ## 1.3.1
 
 - Added support for searching across multiple post categories.
