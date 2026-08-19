@@ -4,12 +4,10 @@
     function initializeLiveSearch(search) {
         if (search.dataset.sraInitialized === 'true') return;
 
-        const form = search.querySelector('.sra-live-search__form');
         const input = search.querySelector('.sra-live-search__input');
         const results = search.querySelector('.sra-live-search__results');
 
         if (
-            !form ||
             !input ||
             !results ||
             typeof sraSearchSettings === 'undefined'
@@ -654,19 +652,28 @@
 
                 if (
                     event.key ===
-                    'Enter' &&
-                    activeIndex >= 0
+                    'Enter'
                 ) {
-                    const item =
-                        getSelectableItems()[
-                            activeIndex
-                        ];
+                    event.preventDefault();
 
-                    if (item) {
-                        event.preventDefault();
+                    if (activeIndex >= 0) {
+                        const item =
+                            getSelectableItems()[
+                                activeIndex
+                            ];
 
-                        item.click();
+                        if (item) {
+                            item.click();
+                        }
+
+                        return;
                     }
+
+                    window.clearTimeout(
+                        timer
+                    );
+
+                    runSearch();
 
                     return;
                 }
