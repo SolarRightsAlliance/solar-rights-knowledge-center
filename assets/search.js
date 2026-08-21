@@ -31,7 +31,7 @@
         function getSelectableItems() {
             return Array.from(
                 results.querySelectorAll(
-                    '.sra-live-search__result, .sra-live-search__view-all'
+                    '.sra-live-search__result'
                 )
             );
         }
@@ -66,6 +66,7 @@
             activeIndex = index;
 
             items[activeIndex].classList.add('is-active');
+
             items[activeIndex].setAttribute(
                 'aria-selected',
                 'true'
@@ -163,30 +164,6 @@
             );
         }
 
-        function createViewAllUrl(term) {
-            const url = new URL(
-                sraSearchSettings.homeUrl,
-                window.location.origin
-            );
-
-            url.searchParams.set(
-                's',
-                term
-            );
-
-            url.searchParams.set(
-                'category_scope',
-                category
-            );
-
-            url.searchParams.set(
-                'post_type_scope',
-                postTypes
-            );
-
-            return url.toString();
-        }
-
         function logClick(
             link,
             clickType,
@@ -261,9 +238,6 @@
                     10
                 ) || 6
             );
-
-            const hasMoreResults =
-                posts.length > maxResults;
 
             const displayedPosts =
                 posts.slice(
@@ -403,48 +377,6 @@
                     );
                 }
             );
-
-            if (hasMoreResults) {
-
-                const viewAll =
-                    document.createElement(
-                        'a'
-                    );
-
-                viewAll.className =
-                    'sra-live-search__view-all';
-
-                viewAll.href =
-                    createViewAllUrl(term);
-
-                viewAll.textContent =
-                    'View all matching articles →';
-
-                viewAll.setAttribute(
-                    'role',
-                    'option'
-                );
-
-                viewAll.setAttribute(
-                    'aria-selected',
-                    'false'
-                );
-
-                viewAll.addEventListener(
-                    'click',
-                    function () {
-                        logClick(
-                            viewAll,
-                            'view_all',
-                            maxResults + 1
-                        );
-                    }
-                );
-
-                results.appendChild(
-                    viewAll
-                );
-            }
 
             results.hidden = false;
 
