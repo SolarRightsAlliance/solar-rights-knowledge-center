@@ -1,693 +1,249 @@
-(function () {
-    'use strict';
-
-    function initializeLiveSearch(search) {
-        if (search.dataset.sraInitialized === 'true') return;
-
-        const input = search.querySelector('.sra-live-search__input');
-        const results = search.querySelector('.sra-live-search__results');
-
-        if (
-            !input ||
-            !results ||
-            typeof sraSearchSettings === 'undefined'
-        ) {
-            return;
-        }
-
-        search.dataset.sraInitialized = 'true';
-
-        const category = search.dataset.category;
-        const postTypes = search.dataset.postTypes || 'post';
-        const noResultsText =
-            search.dataset.noResults ||
-            'No matching articles found.';
-
-        let timer = null;
-        let requestController = null;
-        let activeIndex = -1;
-        let eventToken = '';
-
-        function getSelectableItems() {
-            return Array.from(
-                results.querySelectorAll(
-                    '.sra-live-search__result'
-                )
-            );
-        }
-
-        function resetActiveItem() {
-            getSelectableItems().forEach(function (item) {
-                item.classList.remove('is-active');
-                item.setAttribute('aria-selected', 'false');
-            });
-
-            activeIndex = -1;
-        }
-
-        function setActiveItem(index) {
-            const items = getSelectableItems();
-
-            if (!items.length) {
-                activeIndex = -1;
-                return;
-            }
-
-            if (index < 0) {
-                index = items.length - 1;
-            }
-
-            if (index >= items.length) {
-                index = 0;
-            }
-
-            resetActiveItem();
-
-            activeIndex = index;
-
-            items[activeIndex].classList.add('is-active');
-
-            items[activeIndex].setAttribute(
-                'aria-selected',
-                'true'
-            );
-
-            items[activeIndex].scrollIntoView({
-                block: 'nearest'
-            });
-        }
-
-        function closeResults() {
-            results.hidden = true;
-
-            input.setAttribute(
-                'aria-expanded',
-                'false'
-            );
-
-            resetActiveItem();
-        }
-
-        function showMessage(message) {
-            results.replaceChildren();
-
-            const item = document.createElement('div');
-
-            item.className =
-                'sra-live-search__message';
-
-            item.textContent = message;
-
-            results.appendChild(item);
-
-            results.hidden = false;
-
-            input.setAttribute(
-                'aria-expanded',
-                'true'
-            );
-
-            resetActiveItem();
-        }
-
-        function appendHighlightedText(
-            element,
-            text,
-            term
-        ) {
-            const normalizedTerm = term.trim();
-
-            if (!normalizedTerm) {
-                element.textContent = text;
-                return;
-            }
-
-            const escapedTerm =
-                normalizedTerm.replace(
-                    /[.*+?^${}()|[\]\\]/g,
-                    '\\$&'
-                );
-
-            const pattern = new RegExp(
-                '(' + escapedTerm + ')',
-                'gi'
-            );
-
-            text.split(pattern).forEach(
-                function (part) {
-
-                    if (
-                        part.toLowerCase() ===
-                        normalizedTerm.toLowerCase()
-                    ) {
-                        const mark =
-                            document.createElement(
-                                'mark'
-                            );
-
-                        mark.className =
-                            'sra-live-search__highlight';
-
-                        mark.textContent = part;
-
-                        element.appendChild(mark);
-
-                    } else {
-
-                        element.appendChild(
-                            document.createTextNode(
-                                part
-                            )
-                        );
-                    }
-                }
-            );
-        }
-
-        function logClick(
-            link,
-            clickType,
-            position
-        ) {
-            if (
-                !sraSearchSettings.analytics ||
-                !eventToken
-            ) {
-                return;
-            }
-
-            const body = new URLSearchParams();
-
-            body.set(
-                'action',
-                'sra_search_click'
-            );
-
-            body.set(
-                'nonce',
-                sraSearchSettings.nonce
-            );
-
-            body.set(
-                'event_token',
-                eventToken
-            );
-
-            body.set(
-                'click_type',
-                clickType
-            );
-
-            body.set(
-                'position',
-                String(position)
-            );
-
-            body.set(
-                'url',
-                link.href
-            );
-
-            fetch(
-                sraSearchSettings.ajaxUrl,
-                {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    keepalive: true,
-                    headers: {
-                        'Content-Type':
-                            'application/x-www-form-urlencoded;charset=UTF-8'
-                    },
-                    body: body.toString()
-                }
-            ).catch(function () {});
-        }
-
-        function showPosts(
-            posts,
-            term
-        ) {
-            results.replaceChildren();
-
-            resetActiveItem();
-
-            const maxResults = Math.max(
-                3,
-                parseInt(
-                    sraSearchSettings.maxResults,
-                    10
-                ) || 6
-            );
-
-            const displayedPosts =
-                posts.slice(
-                    0,
-                    maxResults
-                );
-
-            displayedPosts.forEach(
-                function (post, index) {
-
-                    const link =
-                        document.createElement(
-                            'a'
-                        );
-
-                    link.className =
-                        'sra-live-search__result';
-
-                    link.href = post.url;
-
-                    link.target = '_blank';
-
-                    link.rel =
-                        'noopener noreferrer';
-
-                    link.setAttribute(
-                        'role',
-                        'option'
-                    );
-
-                    link.setAttribute(
-                        'aria-selected',
-                        'false'
-                    );
-
-                    link.addEventListener(
-                        'click',
-                        function () {
-                            logClick(
-                                link,
-                                'result',
-                                index + 1
-                            );
-                        }
-                    );
-
-                    if (post.thumbnail) {
-
-                        const image =
-                            document.createElement(
-                                'img'
-                            );
-
-                        image.className =
-                            'sra-live-search__thumb';
-
-                        image.src =
-                            post.thumbnail;
-
-                        image.alt = '';
-
-                        image.loading =
-                            'lazy';
-
-                        link.appendChild(
-                            image
-                        );
-                    }
-
-                    const content =
-                        document.createElement(
-                            'div'
-                        );
-
-                    content.className =
-                        'sra-live-search__content';
-
-                    const title =
-                        document.createElement(
-                            'div'
-                        );
-
-                    title.className =
-                        'sra-live-search__title';
-
-                    if (
-                        sraSearchSettings.highlightTerms
-                    ) {
-                        appendHighlightedText(
-                            title,
-                            post.title,
-                            term
-                        );
-                    } else {
-                        title.textContent =
-                            post.title;
-                    }
-
-                    content.appendChild(
-                        title
-                    );
-
-                    if (post.excerpt) {
-
-                        const excerpt =
-                            document.createElement(
-                                'div'
-                            );
-
-                        excerpt.className =
-                            'sra-live-search__excerpt';
-
-                        if (
-                            sraSearchSettings.highlightTerms
-                        ) {
-                            appendHighlightedText(
-                                excerpt,
-                                post.excerpt,
-                                term
-                            );
-                        } else {
-                            excerpt.textContent =
-                                post.excerpt;
-                        }
-
-                        content.appendChild(
-                            excerpt
-                        );
-                    }
-
-                    link.appendChild(
-                        content
-                    );
-
-                    results.appendChild(
-                        link
-                    );
-                }
-            );
-
-            results.hidden = false;
-
-            input.setAttribute(
-                'aria-expanded',
-                'true'
-            );
-        }
-
-        async function runSearch() {
-            const term =
-                input.value.trim();
-
-            if (term.length < 2) {
-
-                closeResults();
-
-                results.replaceChildren();
-
-                search.classList.remove(
-                    'is-loading'
-                );
-
-                eventToken = '';
-
-                return;
-            }
-
-            if (requestController) {
-                requestController.abort();
-            }
-
-            requestController =
-                new AbortController();
-
-            search.classList.add(
-                'is-loading'
-            );
-
-            const url = new URL(
-                sraSearchSettings.ajaxUrl,
-                window.location.origin
-            );
-
-            url.searchParams.set(
-                'action',
-                'sra_search'
-            );
-
-            url.searchParams.set(
-                'term',
-                term
-            );
-
-            url.searchParams.set(
-                'category',
-                category
-            );
-
-            url.searchParams.set(
-                'post_types',
-                postTypes
-            );
-
-            url.searchParams.set(
-                'nonce',
-                sraSearchSettings.nonce
-            );
-
-            url.searchParams.set(
-                'source',
-                window.location.href
-            );
-
-            try {
-
-                const response =
-                    await fetch(
-                        url.toString(),
-                        {
-                            signal:
-                                requestController.signal,
-                            credentials:
-                                'same-origin'
-                        }
-                    );
-
-                if (!response.ok) {
-                    throw new Error(
-                        'Search request failed.'
-                    );
-                }
-
-                const json =
-                    await response.json();
-
-                if (
-                    !json.success ||
-                    !json.data ||
-                    !Array.isArray(
-                        json.data.results
-                    )
-                ) {
-                    throw new Error(
-                        'Unexpected search response.'
-                    );
-                }
-
-                eventToken =
-                    json.data.eventToken ||
-                    '';
-
-                if (
-                    json.data.results.length ===
-                    0
-                ) {
-                    showMessage(
-                        noResultsText
-                    );
-
-                    return;
-                }
-
-                showPosts(
-                    json.data.results,
-                    term
-                );
-
-            } catch (error) {
-
-                if (
-                    error.name !==
-                    'AbortError'
-                ) {
-                    showMessage(
-                        'Search is temporarily unavailable.'
-                    );
-                }
-
-            } finally {
-
-                search.classList.remove(
-                    'is-loading'
-                );
-            }
-        }
-
-        input.addEventListener(
-            'input',
-            function () {
-
-                window.clearTimeout(
-                    timer
-                );
-
-                resetActiveItem();
-
-                timer =
-                    window.setTimeout(
-                        runSearch,
-                        450
-                    );
-            }
-        );
-
-        input.addEventListener(
-            'keydown',
-            function (event) {
-
-                if (
-                    event.key ===
-                    'ArrowDown'
-                ) {
-                    const items =
-                        getSelectableItems();
-
-                    if (items.length) {
-                        event.preventDefault();
-
-                        setActiveItem(
-                            activeIndex + 1
-                        );
-                    }
-
-                    return;
-                }
-
-                if (
-                    event.key ===
-                    'ArrowUp'
-                ) {
-                    const items =
-                        getSelectableItems();
-
-                    if (items.length) {
-                        event.preventDefault();
-
-                        setActiveItem(
-                            activeIndex - 1
-                        );
-                    }
-
-                    return;
-                }
-
-                if (
-                    event.key ===
-                    'Enter'
-                ) {
-                    event.preventDefault();
-
-                    if (activeIndex >= 0) {
-                        const item =
-                            getSelectableItems()[
-                                activeIndex
-                            ];
-
-                        if (item) {
-                            item.click();
-                        }
-
-                        return;
-                    }
-
-                    window.clearTimeout(
-                        timer
-                    );
-
-                    runSearch();
-
-                    return;
-                }
-
-                if (
-                    event.key ===
-                    'Escape'
-                ) {
-                    event.preventDefault();
-
-                    closeResults();
-
-                    input.blur();
-                }
-            }
-        );
-
-        input.addEventListener(
-            'focus',
-            function () {
-
-                if (
-                    results.children.length >
-                    0
-                ) {
-                    results.hidden = false;
-
-                    input.setAttribute(
-                        'aria-expanded',
-                        'true'
-                    );
-                }
-            }
-        );
-
-        document.addEventListener(
-            'click',
-            function (event) {
-
-                if (
-                    !search.contains(
-                        event.target
-                    )
-                ) {
-                    closeResults();
-                }
-            }
-        );
+.sra-live-search {
+    position: relative;
+    width: 100%;
+    max-width: 760px;
+}
+
+.sra-live-search__form,
+.sra-live-search__input-wrap {
+    width: 100%;
+}
+
+.sra-live-search__input-wrap {
+    position: relative;
+}
+
+.sra-live-search__input {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 62px;
+    margin: 0;
+    padding: 14px 64px 14px 20px;
+    border: 2px solid #0875bd;
+    border-radius: 8px;
+    background-color: #fff;
+    color: #333;
+    font-family: inherit;
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 1.35;
+    appearance: none;
+    -webkit-appearance: none;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sra-live-search__input::placeholder {
+    color: #707070;
+    opacity: 1;
+}
+
+.sra-live-search__input:hover {
+    border-color: #075f9c;
+}
+
+.sra-live-search__input:focus {
+    outline: none;
+    border-color: #075f9c;
+    box-shadow:
+        0 0 0 3px rgba(8, 117, 189, 0.18),
+        0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.sra-live-search__input::-webkit-search-cancel-button {
+    display: none;
+    -webkit-appearance: none;
+}
+
+.sra-live-search__input-wrap::after {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    right: 22px;
+    width: 23px;
+    height: 23px;
+    border: 4px solid #e91d2d;
+    border-radius: 50%;
+    transform: translateY(-60%);
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.sra-live-search__input-wrap::before {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    right: 17px;
+    width: 12px;
+    height: 4px;
+    border-radius: 2px;
+    background: #e91d2d;
+    transform: translateY(8px) rotate(45deg);
+    transform-origin: center;
+    pointer-events: none;
+}
+
+.sra-live-search.is-loading .sra-live-search__input-wrap::before,
+.sra-live-search.is-loading .sra-live-search__input-wrap::after {
+    display: none;
+}
+
+.sra-live-search__status {
+    display: none;
+    position: absolute;
+    z-index: 3;
+    top: 50%;
+    right: 19px;
+    width: 30px;
+    height: 30px;
+    margin-top: -15px;
+    border: 4px solid rgba(233, 29, 45, 0.22);
+    border-top-color: #e91d2d;
+    border-radius: 50%;
+    box-sizing: border-box;
+    pointer-events: none;
+    animation: sra-live-search-spin 0.7s linear infinite;
+}
+
+.sra-live-search.is-loading .sra-live-search__status {
+    display: block;
+}
+
+@keyframes sra-live-search-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.sra-live-search__results {
+    position: absolute;
+    z-index: 9999;
+    top: calc(100% + 8px);
+    right: 0;
+    left: 0;
+    width: 100%;
+    max-height: 520px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.sra-live-search__results[hidden] {
+    display: none;
+}
+
+.sra-live-search__result {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px;
+    border-bottom: 1px solid #eee;
+    color: inherit;
+    text-decoration: none;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sra-live-search__result:last-child {
+    border-bottom: 0;
+}
+
+.sra-live-search__result:hover,
+.sra-live-search__result:focus,
+.sra-live-search__result.is-active {
+    outline: none;
+    background: #f0f7fc;
+    color: inherit;
+    text-decoration: none;
+    box-shadow: inset 4px 0 0 #0875bd;
+}
+
+.sra-live-search__thumb {
+    width: 72px;
+    height: 72px;
+    flex: 0 0 72px;
+    object-fit: cover;
+    border-radius: 4px;
+}
+
+.sra-live-search__content {
+    flex: 1;
+    min-width: 0;
+}
+
+.sra-live-search__title {
+    margin-bottom: 5px;
+    color: #0875bd;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.sra-live-search__excerpt {
+    color: #666;
+    font-size: 15px;
+    line-height: 1.45;
+}
+
+.sra-live-search__highlight {
+    padding: 0;
+    background: #fff2a8;
+    color: inherit;
+    font-weight: inherit;
+}
+
+.sra-live-search__message {
+    padding: 18px;
+    color: #666;
+    background: #fff;
+}
+
+@media (max-width: 600px) {
+    .sra-live-search {
+        max-width: none;
     }
 
-    function initializeAllLiveSearches() {
-        document
-            .querySelectorAll(
-                '.sra-live-search'
-            )
-            .forEach(
-                initializeLiveSearch
-            );
+    .sra-live-search__input {
+        min-height: 56px;
+        padding: 12px 56px 12px 16px;
+        font-size: 17px;
     }
 
-    if (
-        document.readyState ===
-        'loading'
-    ) {
-        document.addEventListener(
-            'DOMContentLoaded',
-            initializeAllLiveSearches
-        );
-    } else {
-        initializeAllLiveSearches();
+    .sra-live-search__input-wrap::after {
+        right: 18px;
+        width: 21px;
+        height: 21px;
     }
 
-    const observer =
-        new MutationObserver(
-            initializeAllLiveSearches
-        );
+    .sra-live-search__input-wrap::before {
+        right: 14px;
+        width: 10px;
+    }
 
-    observer.observe(
-        document.documentElement,
-        {
-            childList: true,
-            subtree: true
-        }
-    );
-})();
+    .sra-live-search__status {
+        right: 15px;
+        width: 28px;
+        height: 28px;
+        margin-top: -14px;
+    }
+
+    .sra-live-search__thumb {
+        width: 58px;
+        height: 58px;
+        flex-basis: 58px;
+    }
+
+    .sra-live-search__title {
+        font-size: 16px;
+    }
+
+    .sra-live-search__excerpt {
+        font-size: 14px;
+    }
+}
